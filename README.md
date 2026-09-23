@@ -4,8 +4,8 @@ A Telegram bot that pushes one short technical note every couple of hours, each 
 back to the source it came from. You rate the note Easy / Medium / Hard and the next note in
 that topic gets harder or easier.
 
-Runs entirely on Cloudflare Workers: a Cron Trigger picks the topic, pulls RSS feeds,
-summarises one article with the Claude API, and sends it to Telegram. Button presses come back
+Runs entirely on Cloudflare Workers and D1: a Cron Trigger picks the topic, pulls RSS feeds,
+summarises one article through OpenRouter, and sends it to Telegram. Button presses come back
 through a webhook and move that topic's difficulty level.
 
 ## How it works
@@ -17,9 +17,9 @@ Topics: `frontend`, `backend`, `ai`, `systems`, `systemdesign`. Each carries a l
 2. Picks the topic that has gone longest without a post.
 3. Fetches that topic's feeds in parallel, drops anything older than 30 days or already seen,
    and drops feeds whose `minLevel` is above your current level for the topic.
-4. Sends the newest candidate's full text to Claude with a brief written for your current level.
-   Claude can answer `skip: true` for press releases and changelogs with no idea in them, in
-   which case the next candidate is tried (up to 6 per run).
+4. Sends the newest candidate's full text to the model with a brief written for your current
+   level. The model can answer `skip: true` for press releases and changelogs with no idea in
+   them, in which case the next candidate is tried (up to 6 per run).
 5. Sends the note with a source button and three rating buttons.
 6. A rating updates the level: Easy `+0.6`, Medium `+0.05`, Hard `-0.5`, clamped to 1-5.
    The level changes both the writing brief and which feeds are eligible.
@@ -66,7 +66,7 @@ npm run db:init
 node_modules/.bin/wrangler secret put TELEGRAM_BOT_TOKEN
 node_modules/.bin/wrangler secret put TELEGRAM_CHAT_ID
 node_modules/.bin/wrangler secret put TELEGRAM_WEBHOOK_SECRET   # any random string you invent
-node_modules/.bin/wrangler secret put ANTHROPIC_API_KEY         # console.anthropic.com
+node_modules/.bin/wrangler secret put OPENROUTER_API_KEY        # openrouter.ai/keys
 node_modules/.bin/wrangler secret put ADMIN_KEY                 # any random string you invent
 ```
 
@@ -93,8 +93,8 @@ Or send `/next` to the bot. Watch logs with `npm run tail`.
 
 - `TZ_OFFSET_MINUTES` - minutes ahead of UTC. `330` is IST.
 - `ACTIVE_HOURS` - `"8-23"` means nothing is sent before 8am or after 11pm local.
-- `ANTHROPIC_MODEL` - `claude-sonnet-5` by default. `claude-haiku-4-5-20251001` is roughly
-  10x cheaper and noticeably blunter.
+- `OPENROUTER_MODEL` - `google/gemini-2.5-flash-lite` by default. Step up to
+  `google/gemini-2.5-flash` or `anthropic/claude-haiku-4.5` if the summaries feel thin.
 
 Cron cadence lives in `[triggers]`. `"0 */2 * * *"` is every 2 hours UTC; with the default
 active window that lands around 8 notes a day.
@@ -104,9 +104,11 @@ Brendan Gregg and Marc Brooker stay out of the way until you have asked for hard
 
 ## Cost
 
-Cloudflare Workers, Cron Triggers, and D1 all sit inside the free tier at this volume.
+Cloudflare Workers, Cron Triggers, and D1 all sit inside the free tier at this volume. D1's free
+plan allows 5 million rows read and 100,000 rows written per day against 5 GB of storage; this
+bot uses a few thousand reads and around 150 writes a day.
 
-Claude is the only real cost: roughly 15k input tokens per article. At 8 notes a day with
-`claude-sonnet-5` that is around $10-15/month, and skipped candidates count too. Switch to
-Haiku to cut it to about $1/month.
-# tech-notes-bot
+OpenRouter is the only real cost: roughly 15k input tokens per article, and around 10 calls a
+day once skipped candidates are counted. On `google/gemini-2.5-flash-lite` at $0.10 per million
+input tokens that is well under $1/month. `google/gemini-2.5-flash` is 3x that,
+`anthropic/claude-haiku-4.5` about 10x.

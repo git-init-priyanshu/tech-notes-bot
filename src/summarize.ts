@@ -11,7 +11,7 @@ export interface Note {
   deeper: string;
 }
 
-const USER_AGENT = "tech-notes-bot/1.0 (+https://github.com/)";
+const USER_AGENT = "tech-notes-bot/1.0";
 
 async function articleText(url: string, fallback: string): Promise<string> {
   try {
@@ -81,26 +81,33 @@ Rules:
 - "deeper": one short sentence naming the specific question to chase next. Empty string if there is none.
 - Plain text only. No markdown, no emoji, no HTML.`;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
+      authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+      "x-title": "tech-notes-bot",
     },
     body: JSON.stringify({
-      model: env.ANTHROPIC_MODEL || "claude-sonnet-5",
+      model: env.OPENROUTER_MODEL || "google/gemini-2.5-flash-lite",
       max_tokens: 700,
+      temperature: 0.3,
       messages: [{ role: "user", content: prompt }],
     }),
   });
 
   if (!response.ok) {
-    console.error("anthropic", response.status, await response.text());
+    console.error("openrouter", response.status, await response.text());
     return null;
   }
 
-  const payload = (await response.json()) as { content: Array<{ type: string; text?: string }> };
-  const raw = payload.content.find((block) => block.type === "text")?.text ?? "";
-  return parseJson(raw);
+  const payload = (await response.json()) as {
+    error?: { message: string };
+    choices?: Array<{ message: { content: string | null } }>;
+  };
+  if (payload.error) {
+    console.error("openrouter", payload.error.message);
+    return null;
+  }
+  return parseJson(payload.choices?.[0]?.message?.content ?? "");
 }
