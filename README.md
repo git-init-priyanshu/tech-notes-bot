@@ -1,27 +1,57 @@
 # tech-notes-bot
 
-A Telegram bot that pushes one short technical note every couple of hours, each with a link
-back to the source it came from. You rate the note Easy / Medium / Hard and the next note in
-that topic gets harder or easier.
+A Telegram bot that pushes 14 short technical notes a day, each with a link back to the source
+it came from. You rate a note Easy / Medium / Hard and the next note in that topic gets harder
+or easier.
 
-Runs entirely on Cloudflare Workers and D1: a Cron Trigger picks the topic, pulls RSS feeds,
-summarises one article through OpenRouter, and sends it to Telegram. Button presses come back
-through a webhook and move that topic's difficulty level.
+Runs entirely on Cloudflare Workers and D1: an hourly Cron Trigger looks up which topic that
+hour is for, picks an unread article, summarises it through OpenRouter, and sends it to
+Telegram. Button presses come back through a webhook and move that topic's difficulty level.
 
-## How it works
+It teaches; it does not report. The model is told to skip launches, releases, funding, hiring
+posts, changelogs, benchmarks and conference recaps outright.
 
-Topics: `frontend`, `backend`, `ai`, `systems`, `systemdesign`. Each carries a level from 1 to 5
-(starts at 2.5).
+## The day
 
-1. Cron fires every 2 hours. Outside `ACTIVE_HOURS` in your timezone, it returns without sending.
-2. Picks the topic that has gone longest without a post.
-3. Fetches that topic's feeds in parallel, drops anything older than 30 days or already seen,
-   and drops feeds whose `minLevel` is above your current level for the topic.
-4. Sends the newest candidate's full text to the model with a brief written for your current
-   level. The model can answer `skip: true` for press releases and changelogs with no idea in
-   them, in which case the next candidate is tried (up to 6 per run).
-5. Sends the note with a source button and three rating buttons.
-6. A rating updates the level: Easy `+0.6`, Medium `+0.05`, Hard `-0.5`, clamped to 1-5.
+One note per hour from 07:00 to 22:00 local, with 12:00 and 18:00 left quiet:
+
+| Local hour | 7 | 8 | 9 | 10 | 11 | 13 | 14 | 15 | 16 | 17 | 19 | 20 | 21 | 22 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Topic | JS | AI | React | Backend | AI | JS | Sys design | AI | React | Backend | JS | AI | Sys design | React |
+
+That is 6 frontend (3 JavaScript + 3 React), 4 AI, 2 backend, 2 system design. The table lives
+in `src/schedule.ts`; edit it and the daily mix changes with it.
+
+Topics: `javascript`, `react`, `backend`, `systemdesign`, `ai`, and `systems`. Each carries a
+level from 1 to 5 (starts at 2.5). `systems` has no scheduled slot and is only reachable through
+`/next systems`.
+
+## Where the notes come from
+
+Two kinds of source:
+
+- **Catalogs** walk a documentation site in curriculum order, oldest lesson first.
+  `javascript` reads the 175 lessons of [javascript.info](https://javascript.info); `react`
+  reads the 179 pages of [react.dev](https://react.dev) via its `llms.txt` index, pulling the
+  raw `.md` behind each page. The list is cached in D1 and refreshed monthly. Once a site has
+  been read end to end the pass starts over.
+- **Feeds** are RSS, used for `backend`, `systemdesign`, `ai` and `systems`. A feed with a
+  `minLevel` stays hidden until your level for that topic reaches it.
+
+Each topic also carries an angle that steers the summary. `ai` is pointed at what companies
+hiring AI engineers actually expect: retrieval and RAG quality, evaluation harnesses and error
+analysis, agent orchestration and tool use, context engineering, guardrails, cost and latency,
+observability. `backend` is pointed at API design judgement. Both live in `src/summarize.ts`.
+
+## Each run
+
+1. Cron fires hourly. If the local hour has no slot, it returns without sending.
+2. Looks up that hour's topic and gathers candidates it has not already sent.
+3. Sends the first candidate's full text to the model with a brief written for your current
+   level. The model can answer `skip: true`, in which case the next candidate is tried (up to 6
+   per run).
+4. Sends the note with a source button and three rating buttons.
+5. A rating updates the level: Easy `+0.6`, Medium `+0.05`, Hard `-0.5`, clamped to 1-5.
    The level changes both the writing brief and which feeds are eligible.
 
 Commands: `/next [topic]`, `/level`, `/stats`, `/help`.
@@ -60,6 +90,10 @@ Paste the printed `database_id` into `wrangler.toml`, then create the tables:
 npm run db:init
 ```
 
+Upgrading an existing install instead? Run `npm run db:migrate`. It adds the catalog table and
+splits the old `frontend` topic into `javascript` and `react`, carrying the level it had learned
+across to both.
+
 ### 5. Set the secrets
 
 ```bash
@@ -92,23 +126,24 @@ Or send `/next` to the bot. Watch logs with `npm run tail`.
 `wrangler.toml` `[vars]`:
 
 - `TZ_OFFSET_MINUTES` - minutes ahead of UTC. `330` is IST.
-- `ACTIVE_HOURS` - `"8-23"` means nothing is sent before 8am or after 11pm local.
 - `OPENROUTER_MODEL` - `google/gemini-2.5-flash-lite` by default. Step up to
   `google/gemini-2.5-flash` or `anthropic/claude-haiku-4.5` if the summaries feel thin.
 
-Cron cadence lives in `[triggers]`. `"0 */2 * * *"` is every 2 hours UTC; with the default
-active window that lands around 8 notes a day.
+The cron in `[triggers]` is `"30 * * * *"`, chosen so that UTC `:30` lands on the hour in IST.
+If you change `TZ_OFFSET_MINUTES`, move the cron minute to match, or the hours in
+`src/schedule.ts` will drift off the hour.
 
-Feeds live in `src/feeds.ts`. `minLevel` gates a feed until your level reaches it, which is how
-Brendan Gregg and Marc Brooker stay out of the way until you have asked for harder material.
+Which topic each hour gets is `SCHEDULE` in `src/schedule.ts`. Sources are `src/sources.ts`;
+`minLevel` gates a feed until your level reaches it, which is how Marc Brooker and Brendan Gregg
+stay out of the way until you have asked for harder material.
 
 ## Cost
 
 Cloudflare Workers, Cron Triggers, and D1 all sit inside the free tier at this volume. D1's free
 plan allows 5 million rows read and 100,000 rows written per day against 5 GB of storage; this
-bot uses a few thousand reads and around 150 writes a day.
+bot uses a few thousand reads and around 300 writes a day.
 
-OpenRouter is the only real cost: roughly 15k input tokens per article, and around 10 calls a
+OpenRouter is the only real cost: roughly 15k input tokens per article, and around 20 calls a
 day once skipped candidates are counted. On `google/gemini-2.5-flash-lite` at $0.10 per million
-input tokens that is well under $1/month. `google/gemini-2.5-flash` is 3x that,
+input tokens that is still well under $1/month. `google/gemini-2.5-flash` is 3x that,
 `anthropic/claude-haiku-4.5` about 10x.
