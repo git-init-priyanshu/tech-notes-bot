@@ -2,6 +2,7 @@ import { briefFor } from "./difficulty";
 import type { Env, Topic } from "./env";
 import type { Candidate } from "./job";
 import { stripTags } from "./rss";
+import type { TopicSlug } from "./sources";
 
 export interface Note {
   skip: boolean;
@@ -12,6 +13,21 @@ export interface Note {
 }
 
 const USER_AGENT = "tech-notes-bot/1.0";
+
+const ANGLE: Record<TopicSlug, string> = {
+  javascript:
+    "Teach the language mechanic itself: how the engine behaves, the exact semantics, and the trap a working developer hits when they assume otherwise.",
+  react:
+    "Teach the React model behind the API: when it runs, what it re-renders, what it guarantees, and the mistake the docs are written to prevent.",
+  backend:
+    "Focus on API and backend design judgement: resource modelling, versioning, pagination, idempotency, error contracts, auth, data modelling, caching, queues, and the failure the design choice is buying protection from.",
+  systemdesign:
+    "Focus on the architecture trade-off: what breaks at scale, which constraint forces the design, and what the alternative would have cost.",
+  ai:
+    "Frame it as what a company hiring an AI engineer today expects them to do: retrieval and RAG quality, evaluation harnesses and error analysis, agent orchestration and tool use, context and prompt engineering, guardrails, cost and latency control, observability, and the data work underneath. Skip capability hype and model leaderboards.",
+  systems:
+    "Focus on what the machine actually does underneath and how to observe it.",
+};
 
 async function articleText(candidate: Candidate): Promise<string> {
   try {
@@ -56,6 +72,8 @@ export async function summarize(env: Env, topic: Topic, candidate: Candidate): P
 
 ${briefFor(topic.level)}
 
+${ANGLE[topic.slug as TopicSlug] ?? ""}
+
 Source: ${candidate.source}
 Title: ${candidate.title}
 URL: ${candidate.url}
@@ -74,8 +92,10 @@ Reply with ONLY a JSON object, no prose and no code fence:
   "deeper": string
 }
 
-Rules:
-- Set "skip": true and leave the other fields empty if the piece is a press release, a job post, a changelog with no idea in it, a paywalled stub, or has no technical substance worth two minutes.
+This reader wants to learn something durable. They do not want news.
+- Set "skip": true and leave the other fields empty if the piece is news rather than teaching: a funding round, an acquisition, a hiring or job post, a product launch or availability announcement, a model or version release, a changelog or release notes, a roadmap, a conference or event recap, an interview, a press release, a benchmark or leaderboard result, a paywalled stub, or vendor marketing.
+- Also skip a table of contents or index page, a deprecated legacy API, and anything with no technical idea worth two minutes.
+- If the piece reports an event but explains a durable technique underneath it, do not skip; write about the technique and ignore the event.
 - "headline": under 60 characters, states the idea, not the event.
 - "takeaway": one sentence, under 25 words, the thing worth remembering.
 - "points": exactly 3 bullets, each under 20 words, concrete mechanism or trade-off. No filler, no "learn more".
