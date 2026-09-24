@@ -7,7 +7,6 @@ export interface Env {
   ADMIN_KEY: string;
   OPENROUTER_MODEL: string;
   TZ_OFFSET_MINUTES: string;
-  ACTIVE_HOURS: string;
 }
 
 export interface Topic {

@@ -1,6 +1,7 @@
 import { isRating, nextLevel } from "./difficulty";
 import type { Env, Topic } from "./env";
 import { runOnce } from "./job";
+import { slotFor } from "./schedule";
 import { answerCallback, markRated, sendPlain, setWebhook } from "./telegram";
 
 interface Update {
@@ -10,13 +11,6 @@ interface Update {
     data?: string;
     message?: { chat: { id: number }; message_id: number };
   };
-}
-
-function withinActiveHours(env: Env, now: Date): boolean {
-  const [from, to] = env.ACTIVE_HOURS.split("-").map(Number);
-  const local = new Date(now.getTime() + Number(env.TZ_OFFSET_MINUTES) * 60_000);
-  const hour = local.getUTCHours();
-  return hour >= from && hour <= to;
 }
 
 async function handleRating(env: Env, query: NonNullable<Update["callback_query"]>): Promise<void> {
@@ -62,11 +56,11 @@ async function handleCommand(env: Env, text: string): Promise<void> {
     await sendPlain(
       env,
       [
-        "Short technical notes, every couple of hours, with the source attached.",
+        "14 short technical notes a day, 7am to 10pm, with the source attached.",
         "",
         "Rate each one and the next note in that bucket gets harder or easier.",
         "",
-        "<b>/next</b> [frontend|backend|ai|systems|systemdesign] - send one now",
+        "<b>/next</b> [javascript|react|backend|systemdesign|ai|systems] - send one now",
         "<b>/level</b> - current difficulty per topic",
         "<b>/stats</b> - what you have been sent and how you rated it",
       ].join("\n"),
@@ -138,7 +132,8 @@ export default {
   },
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    if (!withinActiveHours(env, new Date(event.scheduledTime))) return;
-    ctx.waitUntil(runOnce(env).then((result) => console.log(result)));
+    const slot = slotFor(env, new Date(event.scheduledTime));
+    if (!slot) return;
+    ctx.waitUntil(runOnce(env, slot).then((result) => console.log(result)));
   },
 };

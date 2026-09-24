@@ -3,7 +3,7 @@ main = "src/index.ts"
 compatibility_date = "2025-09-01"
 
 [triggers]
-crons = ["0 */2 * * *"]
+crons = ["30 * * * *"]
 
 [[d1_databases]]
 binding = "DB"
@@ -13,4 +13,3 @@ database_id = "73532c3c-2908-42da-aa72-16b5f1e0f417"
 [vars]
 OPENROUTER_MODEL = "google/gemini-2.5-flash-lite"
 TZ_OFFSET_MINUTES = "330"
-ACTIVE_HOURS = "8-23"
