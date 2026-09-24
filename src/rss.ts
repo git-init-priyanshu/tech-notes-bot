@@ -23,7 +23,7 @@ const ENTITIES: Record<string, string> = {
   rdquo: '"',
 };
 
-function decode(raw: string): string {
+export function decodeEntities(raw: string): string {
   const cdata = raw.match(CDATA);
   const text = cdata ? cdata[1] : raw;
   return text
@@ -37,16 +37,16 @@ function decode(raw: string): string {
 
 function tagText(block: string, name: string): string {
   const match = block.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, "i"));
-  return match ? decode(match[1]) : "";
+  return match ? decodeEntities(match[1]) : "";
 }
 
 function itemLink(block: string): string {
   const plain = tagText(block, "link");
   if (plain.startsWith("http")) return plain;
   const alternate = block.match(/<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["']/i);
-  if (alternate) return decode(alternate[1]);
+  if (alternate) return decodeEntities(alternate[1]);
   const anyHref = block.match(/<link[^>]*href=["']([^"']+)["']/i);
-  return anyHref ? decode(anyHref[1]) : "";
+  return anyHref ? decodeEntities(anyHref[1]) : "";
 }
 
 export function parseFeed(xml: string): FeedItem[] {

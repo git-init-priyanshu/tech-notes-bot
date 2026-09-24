@@ -8,6 +8,7 @@
     "tail": "wrangler tail",
     "db:init": "wrangler d1 execute tech-notes --remote --file=schema.sql",
     "db:init:local": "wrangler d1 execute tech-notes --local --file=schema.sql",
+    "db:migrate": "wrangler d1 execute tech-notes --remote --file=migrations/0001_schedule_and_catalog.sql",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

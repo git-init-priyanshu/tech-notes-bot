@@ -1,14 +1,21 @@
+import { catalogCandidates } from "./catalog";
 import type { Env, Topic } from "./env";
-import { FEEDS, type TopicSlug } from "./feeds";
-import { parseFeed, type FeedItem } from "./rss";
+import { parseFeed } from "./rss";
+import { SOURCES, type RssSource, type TopicSlug } from "./sources";
 import { summarize } from "./summarize";
 import { ratingKeyboard, renderPost, sendPost } from "./telegram";
 
-const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const RECYCLE_AFTER_MS = 90 * 24 * 60 * 60 * 1000;
 const CANDIDATES_PER_RUN = 6;
 
-interface Candidate extends FeedItem {
+export interface Candidate {
+  title: string;
+  url: string;
+  textUrl: string;
+  description: string;
   source: string;
+  format: "html" | "markdown";
+  published: number;
 }
 
 async function pickTopic(env: Env, slug?: string): Promise<Topic | null> {
@@ -20,8 +27,7 @@ async function pickTopic(env: Env, slug?: string): Promise<Topic | null> {
   ).first<Topic>();
 }
 
-async function gatherCandidates(env: Env, topic: Topic): Promise<Candidate[]> {
-  const feeds = FEEDS[topic.slug as TopicSlug].filter((feed) => (feed.minLevel ?? 1) <= topic.level + 0.5);
+async function rssCandidates(env: Env, feeds: RssSource[]): Promise<Candidate[]> {
   const fetched = await Promise.allSettled(
     feeds.map(async (feed) => {
       const response = await fetch(feed.url, {
@@ -29,26 +35,64 @@ async function gatherCandidates(env: Env, topic: Topic): Promise<Candidate[]> {
         signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) throw new Error(`${feed.url} -> ${response.status}`);
-      return parseFeed(await response.text()).map((item) => ({ ...item, source: feed.source }));
+      return parseFeed(await response.text()).map<Candidate>((item) => ({
+        title: item.title,
+        url: item.link,
+        textUrl: item.link,
+        description: item.description,
+        source: feed.name,
+        format: "html",
+        published: item.published,
+      }));
     }),
   );
 
-  const cutoff = Date.now() - MAX_AGE_MS;
   const fresh = fetched
     .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
-    .filter((item) => item.published >= cutoff)
-    .sort((a, b) => b.published - a.published)
-    .slice(0, 80);
-
+    .filter((item, index, all) => all.findIndex((other) => other.url === item.url) === index)
+    .sort((a, b) => b.published - a.published);
   if (fresh.length === 0) return [];
 
   const placeholders = fresh.map(() => "?").join(",");
+  const urls = fresh.map((item) => item.url);
   const { results } = await env.DB.prepare(`SELECT url FROM seen WHERE url IN (${placeholders})`)
-    .bind(...fresh.map((item) => item.link))
+    .bind(...urls)
     .all<{ url: string }>();
-  const seen = new Set(results.map((row) => row.url));
+  let seen = new Set(results.map((row) => row.url));
 
-  return fresh.filter((item) => !seen.has(item.link));
+  if (fresh.every((item) => seen.has(item.url))) {
+    await env.DB.prepare(`DELETE FROM seen WHERE seen_at < ? AND url IN (${placeholders})`)
+      .bind(Date.now() - RECYCLE_AFTER_MS, ...urls)
+      .run();
+    const { results: still } = await env.DB.prepare(`SELECT url FROM seen WHERE url IN (${placeholders})`)
+      .bind(...urls)
+      .all<{ url: string }>();
+    seen = new Set(still.map((row) => row.url));
+  }
+
+  return fresh.filter((item) => !seen.has(item.url));
+}
+
+async function gatherCandidates(env: Env, topic: Topic): Promise<Candidate[]> {
+  const sources = SOURCES[topic.slug as TopicSlug] ?? [];
+  const catalogs = sources.filter((source) => source.kind === "catalog");
+  if (catalogs.length > 0) {
+    const gathered = await Promise.all(catalogs.map((source) => catalogCandidates(env, source)));
+    return gathered.flat().map((entry) => ({
+      title: entry.title,
+      url: entry.url,
+      textUrl: entry.textUrl,
+      description: entry.title,
+      source: entry.source,
+      format: entry.format,
+      published: Date.now(),
+    }));
+  }
+
+  const feeds = sources.filter(
+    (source): source is RssSource => source.kind === "rss" && (source.minLevel ?? 1) <= topic.level + 0.5,
+  );
+  return await rssCandidates(env, feeds);
 }
 
 export async function runOnce(env: Env, slug?: string): Promise<string> {
@@ -59,9 +103,9 @@ export async function runOnce(env: Env, slug?: string): Promise<string> {
   if (candidates.length === 0) return `${topic.slug}: no fresh candidates`;
 
   for (const candidate of candidates.slice(0, CANDIDATES_PER_RUN)) {
-    const note = await summarize(env, topic, candidate, candidate.source);
+    const note = await summarize(env, topic, candidate);
     await env.DB.prepare("INSERT OR IGNORE INTO seen (url, seen_at) VALUES (?, ?)")
-      .bind(candidate.link, Date.now())
+      .bind(candidate.url, Date.now())
       .run();
     if (!note || note.skip) continue;
 
@@ -69,14 +113,14 @@ export async function runOnce(env: Env, slug?: string): Promise<string> {
       `INSERT INTO posts (topic, url, title, source, summary, level, sent_at)
        VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     )
-      .bind(topic.slug, candidate.link, candidate.title, candidate.source, note.headline, topic.level, Date.now())
+      .bind(topic.slug, candidate.url, candidate.title, candidate.source, note.headline, topic.level, Date.now())
       .first<{ id: number }>();
     if (!row) return "insert failed";
 
     const messageId = await sendPost(
       env,
-      renderPost(topic, note, candidate.source, candidate.link),
-      ratingKeyboard(row.id, candidate.link),
+      renderPost(topic, note, candidate.source, candidate.url),
+      ratingKeyboard(row.id, candidate.url),
     );
     if (messageId === null) return "telegram send failed";
 

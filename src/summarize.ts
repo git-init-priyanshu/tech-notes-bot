@@ -1,6 +1,6 @@
 import { briefFor } from "./difficulty";
 import type { Env, Topic } from "./env";
-import type { FeedItem } from "./rss";
+import type { Candidate } from "./job";
 import { stripTags } from "./rss";
 
 export interface Note {
@@ -13,17 +13,18 @@ export interface Note {
 
 const USER_AGENT = "tech-notes-bot/1.0";
 
-async function articleText(url: string, fallback: string): Promise<string> {
+async function articleText(candidate: Candidate): Promise<string> {
   try {
-    const response = await fetch(url, {
-      headers: { "user-agent": USER_AGENT, accept: "text/html" },
+    const response = await fetch(candidate.textUrl, {
+      headers: { "user-agent": USER_AGENT, accept: "text/html, text/plain, */*" },
       signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) return fallback;
-    const body = stripTags(await response.text());
-    return body.length > 600 ? body.slice(0, 14_000) : fallback;
+    if (!response.ok) return candidate.description;
+    const raw = await response.text();
+    const body = candidate.format === "markdown" ? raw.replace(/\s+/g, " ").trim() : stripTags(raw);
+    return body.length > 600 ? body.slice(0, 14_000) : candidate.description;
   } catch {
-    return fallback;
+    return candidate.description;
   }
 }
 
@@ -47,17 +48,17 @@ function parseJson(raw: string): Note | null {
   }
 }
 
-export async function summarize(env: Env, topic: Topic, item: FeedItem, source: string): Promise<Note | null> {
-  const text = await articleText(item.link, item.description);
+export async function summarize(env: Env, topic: Topic, candidate: Candidate): Promise<Note | null> {
+  const text = await articleText(candidate);
   if (text.length < 300) return null;
 
   const prompt = `You write a single push notification for one engineer's phone. Topic bucket: ${topic.label}. Their current difficulty level for this bucket is ${topic.level.toFixed(1)} out of 5.
 
 ${briefFor(topic.level)}
 
-Source: ${source}
-Title: ${item.title}
-URL: ${item.link}
+Source: ${candidate.source}
+Title: ${candidate.title}
+URL: ${candidate.url}
 
 Article text:
 """
