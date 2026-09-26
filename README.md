@@ -126,8 +126,10 @@ Or send `/next` to the bot. Watch logs with `npm run tail`.
 `wrangler.toml` `[vars]`:
 
 - `TZ_OFFSET_MINUTES` - minutes ahead of UTC. `330` is IST.
-- `OPENROUTER_MODEL` - `google/gemini-2.5-flash-lite` by default. Step up to
-  `google/gemini-2.5-flash` or `anthropic/claude-haiku-4.5` if the summaries feel thin.
+- `OPENROUTER_MODEL` - `openai/gpt-6-luna` by default. Any model you put here has to support
+  `response_format: json_schema`, because the note is requested as a strict schema rather than
+  scraped out of prose. Note that `gpt-6-luna` ignores `temperature`, so the call does not send
+  one; a model swap that wants sampling control has to add it back.
 
 The cron in `[triggers]` is `"30 * * * *"`, chosen so that UTC `:30` lands on the hour in IST.
 If you change `TZ_OFFSET_MINUTES`, move the cron minute to match, or the hours in
@@ -143,7 +145,18 @@ Cloudflare Workers, Cron Triggers, and D1 all sit inside the free tier at this v
 plan allows 5 million rows read and 100,000 rows written per day against 5 GB of storage; this
 bot uses a few thousand reads and around 300 writes a day.
 
-OpenRouter is the only real cost: roughly 15k input tokens per article, and around 20 calls a
-day once skipped candidates are counted. On `google/gemini-2.5-flash-lite` at $0.10 per million
-input tokens that is still well under $1/month. `google/gemini-2.5-flash` is 3x that,
-`anthropic/claude-haiku-4.5` about 10x.
+OpenRouter is the only real cost. An article is capped at 14,000 characters, so a call runs
+roughly 4k input tokens, and about 25 calls a day once skipped candidates are counted. Output is
+larger than it looks: `reasoning: { effort: "low" }` tokens bill at the output rate on top of the
+note itself.
+
+| Model | in $/M | out $/M | ~$/month |
+|---|---|---|---|
+| `openai/gpt-6-luna` (default) | 0.10 | 0.50 | ~0.75 |
+| `google/gemini-2.5-flash-lite` | 0.10 | 0.40 | ~0.55 |
+| `google/gemini-2.5-flash` | 0.30 | 2.50 | ~2.45 |
+| `anthropic/claude-haiku-4.5` | 1.00 | 5.00 | ~6.15 |
+
+`openai/gpt-6-luna-pro` costs the same per token as `gpt-6-luna` and is the same weights served
+with `reasoning.mode: pro`. It is not the default: turning an article into five fields is not a
+reasoning-heavy task, so the extra reasoning tokens are paid for and thrown away.
