@@ -26,18 +26,32 @@ export function ratingKeyboard(postId: number, url: string) {
   };
 }
 
+// Telegram rejects a sendMessage body over 4096 characters, so a long note drops its last
+// bullets rather than failing to arrive.
+const TELEGRAM_TEXT_LIMIT = 4096;
+
 export function renderPost(topic: Topic, note: Note, source: string, url: string): string {
-  const lines = [
+  const head = [
     `${topic.emoji} <b>${escapeHtml(topic.label)}</b> \u00b7 level ${topic.level.toFixed(1)}`,
     "",
     `<b>${escapeHtml(note.headline)}</b>`,
     escapeHtml(note.takeaway),
     "",
-    ...note.points.map((point) => `\u2022 ${escapeHtml(point)}`),
   ];
-  if (note.deeper) lines.push("", `\ud83d\udd0e ${escapeHtml(note.deeper)}`);
-  lines.push("", `<a href="${escapeHtml(url)}">${escapeHtml(source)}</a>`);
-  return lines.join("\n");
+  const tail = note.deeper ? [`\ud83d\udd0e ${escapeHtml(note.deeper)}`, ""] : [];
+  tail.push(`<a href="${escapeHtml(url)}">${escapeHtml(source)}</a>`);
+
+  const budget = TELEGRAM_TEXT_LIMIT - [...head, "", ...tail].join("\n").length;
+  const points: string[] = [];
+  let used = 0;
+  for (const point of note.points) {
+    const line = `\u2022 ${escapeHtml(point)}`;
+    if (used + line.length + 1 > budget) break;
+    points.push(line);
+    used += line.length + 1;
+  }
+
+  return [...head, ...points, "", ...tail].join("\n");
 }
 
 export async function sendPost(env: Env, text: string, keyboard: unknown): Promise<number | null> {
