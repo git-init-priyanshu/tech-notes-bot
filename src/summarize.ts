@@ -120,9 +120,30 @@ This reader wants to learn something durable. They do not want news.
       "x-title": "tech-notes-bot",
     },
     body: JSON.stringify({
-      model: env.OPENROUTER_MODEL || "google/gemini-2.5-flash-lite",
-      max_tokens: 1600,
-      temperature: 0.3,
+      model: env.OPENROUTER_MODEL || "openai/gpt-6-luna",
+      // Reasoning tokens are billed as output and spend this budget before the note does,
+      // so the ceiling is well above the longest note a render can actually fit.
+      max_tokens: 4000,
+      reasoning: { effort: "low" },
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "note",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              skip: { type: "boolean" },
+              headline: { type: "string" },
+              takeaway: { type: "string" },
+              points: { type: "array", items: { type: "string" } },
+              deeper: { type: "string" },
+            },
+            required: ["skip", "headline", "takeaway", "points", "deeper"],
+            additionalProperties: false,
+          },
+        },
+      },
       messages: [{ role: "user", content: prompt }],
     }),
   });
