@@ -56,7 +56,7 @@ function parseJson(raw: string): Note | null {
       skip: false,
       headline: parsed.headline,
       takeaway: parsed.takeaway,
-      points: parsed.points.slice(0, 4),
+      points: parsed.points.filter((point): point is string => typeof point === "string" && point.trim().length > 0),
       deeper: parsed.deeper ?? "",
     };
   } catch {
@@ -88,7 +88,7 @@ Reply with ONLY a JSON object, no prose and no code fence:
   "skip": boolean,
   "headline": string,
   "takeaway": string,
-  "points": [string, string, string],
+  "points": [string, ...],
   "deeper": string
 }
 
@@ -98,7 +98,17 @@ This reader wants to learn something durable. They do not want news.
 - If the piece reports an event but explains a durable technique underneath it, do not skip; write about the technique and ignore the event.
 - "headline": under 60 characters, states the idea, not the event.
 - "takeaway": one sentence, under 25 words, the thing worth remembering.
-- "points": exactly 3 bullets, each under 20 words, concrete mechanism or trade-off. No filler, no "learn more".
+- "points": the body of the note, and the reason it exists. Write as many bullets as this
+  particular piece actually needs, and no more: a simple idea may take 4, a dense one 15. Do not
+  pad to a number and do not stop early while a load-bearing part is still unexplained.
+  Together they must teach the thing well enough that the reader never has to open the source.
+- Every bullet carries one idea and a concrete detail: the real API or option name, the number,
+  the default, the order things run in, the exact error, the specific case that breaks. A bullet
+  that could be guessed from the headline is worth nothing, so cut it.
+- Write the bullets in simple English. Short common words, active voice, one clause where one
+  clause will do, under 25 words each. Gloss a term the moment you use it. Plain does not mean
+  vague: keep the precise technical noun and explain it, never swap it for something fuzzier.
+- Order the bullets so they build: what it is, how it works, then where it bites.
 - "deeper": one short sentence naming the specific question to chase next. Empty string if there is none.
 - Plain text only. No markdown, no emoji, no HTML.`;
 
@@ -111,7 +121,7 @@ This reader wants to learn something durable. They do not want news.
     },
     body: JSON.stringify({
       model: env.OPENROUTER_MODEL || "google/gemini-2.5-flash-lite",
-      max_tokens: 700,
+      max_tokens: 1600,
       temperature: 0.3,
       messages: [{ role: "user", content: prompt }],
     }),
