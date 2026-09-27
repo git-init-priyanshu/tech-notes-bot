@@ -1,6 +1,6 @@
 # tech-notes-bot
 
-A Telegram bot that pushes 14 short technical notes a day, each with a link back to the source
+A Telegram bot that pushes 8 short technical notes a day, each with a link back to the source
 it came from. You rate a note Easy / Medium / Hard and the next note in that topic gets harder
 or easier.
 
@@ -13,14 +13,15 @@ posts, changelogs, benchmarks and conference recaps outright.
 
 ## The day
 
-One note per hour from 07:00 to 22:00 local, with 12:00 and 18:00 left quiet:
+One note every second hour from 07:00 to 21:00 local:
 
-| Local hour | 7 | 8 | 9 | 10 | 11 | 13 | 14 | 15 | 16 | 17 | 19 | 20 | 21 | 22 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Topic | JS | AI | React | Backend | AI | JS | Sys design | AI | React | Backend | JS | AI | Sys design | React |
+| Local hour | 7 | 9 | 11 | 13 | 15 | 17 | 19 | 21 |
+|---|---|---|---|---|---|---|---|---|
+| Topic | JS | AI | React | Backend | JS | Sys design | AI | React |
 
-That is 6 frontend (3 JavaScript + 3 React), 4 AI, 2 backend, 2 system design. The table lives
-in `src/schedule.ts`; edit it and the daily mix changes with it.
+That is 4 frontend (2 JavaScript + 2 React), 2 AI, 1 backend, 1 system design. The table lives
+in `src/schedule.ts`; edit it and the daily mix changes with it. The cron stays hourly either
+way, and an hour with no entry just returns early.
 
 Topics: `javascript`, `react`, `backend`, `systemdesign`, `ai`, and `systems`. Each carries a
 level from 1 to 5 (starts at 2.5). `systems` has no scheduled slot and is only reachable through
@@ -143,19 +144,19 @@ stay out of the way until you have asked for harder material.
 
 Cloudflare Workers, Cron Triggers, and D1 all sit inside the free tier at this volume. D1's free
 plan allows 5 million rows read and 100,000 rows written per day against 5 GB of storage; this
-bot uses a few thousand reads and around 300 writes a day.
+bot uses a few thousand reads and around 150 writes a day.
 
 OpenRouter is the only real cost. An article is capped at 14,000 characters, so a call runs
-roughly 4k input tokens, and about 25 calls a day once skipped candidates are counted. Output is
+roughly 4k input tokens, and about 14 calls a day once skipped candidates are counted. Output is
 larger than it looks: `reasoning: { effort: "low" }` tokens bill at the output rate on top of the
 note itself.
 
 | Model | in $/M | out $/M | ~$/month |
 |---|---|---|---|
-| `openai/gpt-6-luna` (default) | 0.10 | 0.50 | ~0.75 |
-| `google/gemini-2.5-flash-lite` | 0.10 | 0.40 | ~0.55 |
-| `google/gemini-2.5-flash` | 0.30 | 2.50 | ~2.45 |
-| `anthropic/claude-haiku-4.5` | 1.00 | 5.00 | ~6.15 |
+| `openai/gpt-6-luna` (default) | 0.10 | 0.50 | ~0.34 |
+| `google/gemini-2.5-flash-lite` | 0.10 | 0.40 | ~0.31 |
+| `google/gemini-2.5-flash` | 0.30 | 2.50 | ~1.37 |
+| `anthropic/claude-haiku-4.5` | 1.00 | 5.00 | ~3.44 |
 
 `openai/gpt-6-luna-pro` costs the same per token as `gpt-6-luna` and is the same weights served
 with `reasoning.mode: pro`. It is not the default: turning an article into five fields is not a
