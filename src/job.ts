@@ -7,6 +7,37 @@ import { ratingKeyboard, renderPost, sendPost } from "./telegram";
 
 const RECYCLE_AFTER_MS = 90 * 24 * 60 * 60 * 1000;
 const CANDIDATES_PER_RUN = 6;
+// D1 allows at most 100 bound parameters per query, so a url list is always checked in chunks
+// that leave room for the other bindings. The pool is capped so a busy topic cannot grow the
+// candidate list without bound.
+const CANDIDATE_POOL = 240;
+const URLS_PER_QUERY = 80;
+
+async function seenUrls(env: Env, urls: string[]): Promise<Set<string>> {
+  const seen = new Set<string>();
+  for (let start = 0; start < urls.length; start += URLS_PER_QUERY) {
+    const chunk = urls.slice(start, start + URLS_PER_QUERY);
+    const { results } = await env.DB.prepare(
+      `SELECT url FROM seen WHERE url IN (${chunk.map(() => "?").join(",")})`,
+    )
+      .bind(...chunk)
+      .all<{ url: string }>();
+    for (const row of results) seen.add(row.url);
+  }
+  return seen;
+}
+
+async function recycleSeen(env: Env, urls: string[]): Promise<void> {
+  const cutoff = Date.now() - RECYCLE_AFTER_MS;
+  for (let start = 0; start < urls.length; start += URLS_PER_QUERY) {
+    const chunk = urls.slice(start, start + URLS_PER_QUERY);
+    await env.DB.prepare(
+      `DELETE FROM seen WHERE seen_at < ? AND url IN (${chunk.map(() => "?").join(",")})`,
+    )
+      .bind(cutoff, ...chunk)
+      .run();
+  }
+}
 
 export interface Candidate {
   title: string;
@@ -50,24 +81,15 @@ async function rssCandidates(env: Env, feeds: RssSource[]): Promise<Candidate[]>
   const fresh = fetched
     .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
     .filter((item, index, all) => all.findIndex((other) => other.url === item.url) === index)
-    .sort((a, b) => b.published - a.published);
+    .sort((a, b) => b.published - a.published)
+    .slice(0, CANDIDATE_POOL);
   if (fresh.length === 0) return [];
 
-  const placeholders = fresh.map(() => "?").join(",");
   const urls = fresh.map((item) => item.url);
-  const { results } = await env.DB.prepare(`SELECT url FROM seen WHERE url IN (${placeholders})`)
-    .bind(...urls)
-    .all<{ url: string }>();
-  let seen = new Set(results.map((row) => row.url));
-
+  let seen = await seenUrls(env, urls);
   if (fresh.every((item) => seen.has(item.url))) {
-    await env.DB.prepare(`DELETE FROM seen WHERE seen_at < ? AND url IN (${placeholders})`)
-      .bind(Date.now() - RECYCLE_AFTER_MS, ...urls)
-      .run();
-    const { results: still } = await env.DB.prepare(`SELECT url FROM seen WHERE url IN (${placeholders})`)
-      .bind(...urls)
-      .all<{ url: string }>();
-    seen = new Set(still.map((row) => row.url));
+    await recycleSeen(env, urls);
+    seen = await seenUrls(env, urls);
   }
 
   return fresh.filter((item) => !seen.has(item.url));
