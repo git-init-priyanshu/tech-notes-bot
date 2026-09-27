@@ -66,7 +66,7 @@ function parseJson(raw: string): Note | null {
 
 export async function summarize(env: Env, topic: Topic, candidate: Candidate): Promise<Note | null> {
   const text = await articleText(candidate);
-  if (text.length < 300) return null;
+  if (text.length < 300) return { skip: true, headline: "", takeaway: "", points: [], deeper: "" };
 
   const prompt = `You write a single push notification for one engineer's phone. Topic bucket: ${topic.label}. Their current difficulty level for this bucket is ${topic.level.toFixed(1)} out of 5.
 

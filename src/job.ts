@@ -125,11 +125,14 @@ export async function runOnce(env: Env, slug?: string): Promise<string> {
   if (candidates.length === 0) return `${topic.slug}: no fresh candidates`;
 
   for (const candidate of candidates.slice(0, CANDIDATES_PER_RUN)) {
+    // A null note means the call itself failed, so the article stays unseen and comes back
+    // round. Only a real verdict, sent or skipped, retires it.
     const note = await summarize(env, topic, candidate);
+    if (!note) continue;
     await env.DB.prepare("INSERT OR IGNORE INTO seen (url, seen_at) VALUES (?, ?)")
       .bind(candidate.url, Date.now())
       .run();
-    if (!note || note.skip) continue;
+    if (note.skip) continue;
 
     const row = await env.DB.prepare(
       `INSERT INTO posts (topic, url, title, source, summary, level, sent_at)
