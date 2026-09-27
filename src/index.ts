@@ -134,6 +134,10 @@ export default {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const slot = slotFor(env, new Date(event.scheduledTime));
     if (!slot) return;
-    ctx.waitUntil(runOnce(env, slot).then((result) => console.log(result)));
+    ctx.waitUntil(
+      runOnce(env, slot)
+        .then((result) => console.log(result))
+        .catch((error) => console.error("run failed", slot, String(error))),
+    );
   },
 };
