@@ -56,7 +56,7 @@ async function handleCommand(env: Env, text: string): Promise<void> {
     await sendPlain(
       env,
       [
-        "14 short technical notes a day, 7am to 10pm, with the source attached.",
+        "8 short technical notes a day, 7am to 9pm, with the source attached.",
         "",
         "Rate each one and the next note in that bucket gets harder or easier.",
         "",
