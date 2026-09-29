@@ -1,16 +1,13 @@
 import type { Env } from "./env";
 import type { TopicSlug } from "./sources";
 
-// 8 notes a day, every second hour from 07:00 to 21:00 local.
+// 5 notes a day, one per topic, spaced about five hours apart around the clock.
 export const SCHEDULE: Record<number, TopicSlug> = {
-  7: "javascript",
-  9: "ai",
-  11: "react",
-  13: "backend",
-  15: "javascript",
-  17: "systemdesign",
-  19: "ai",
-  21: "react",
+  0: "ai",
+  5: "javascript",
+  10: "react",
+  15: "backend",
+  20: "systemdesign",
 };
 
 export function localHour(env: Env, when: Date): number {
