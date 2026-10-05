@@ -1,4 +1,3 @@
-import { briefFor } from "./difficulty";
 import type { Env, Topic } from "./env";
 import type { Candidate } from "./job";
 import { stripTags } from "./rss";
@@ -10,6 +9,13 @@ export interface Note {
   takeaway: string;
   points: string[];
   deeper: string;
+}
+
+export interface LessonFeedback {
+  mode: "explain" | "repeat";
+  previousNote: string;
+  daysWithoutDone: number;
+  explainCount: number;
 }
 
 const USER_AGENT = "tech-notes-bot/1.0";
@@ -64,13 +70,24 @@ function parseJson(raw: string): Note | null {
   }
 }
 
-export async function summarize(env: Env, topic: Topic, candidate: Candidate): Promise<Note | null> {
+export async function summarize(
+  env: Env,
+  topic: Topic,
+  candidate: Candidate,
+  feedback?: LessonFeedback,
+): Promise<Note | null> {
   const text = await articleText(candidate);
-  if (text.length < 300) return { skip: true, headline: "", takeaway: "", points: [], deeper: "" };
+  if (text.length < 300 && !feedback) return { skip: true, headline: "", takeaway: "", points: [], deeper: "" };
 
-  const prompt = `You write a single push notification for one engineer's phone. Topic bucket: ${topic.label}. Their current difficulty level for this bucket is ${topic.level.toFixed(1)} out of 5.
+  const prompt = `You write a single push notification for one engineer's phone. Topic bucket: ${topic.label}.
 
-${briefFor(topic.level)}
+Teach a working developer in plain English. Define unfamiliar terms, explain the mechanism, and give concrete examples and trade-offs.
+${feedback ? `This is the same chapter, not a new lesson. This chapter has ${feedback.daysWithoutDone} recorded local calendar days without Done and ${feedback.explainCount} Explain more clicks.
+${feedback.mode === "repeat" ? "Rewrite the lesson so it is much easier to digest than the previous note." : "Explain this chapter again using a clearer worked example and step-by-step reasoning."}
+Treat these counts as signals that the presentation may be too difficult, not as proof of the reader's ability. As the counts grow, introduce fewer ideas at once, define prerequisites, and use shorter sentences. Start with the basic idea, show one small concrete example, then explain why it works. Keep the facts accurate and stay on this chapter. Do not add advanced tangents. Do not skip this lesson.
+
+Previous note:
+${feedback.previousNote}` : ""}
 
 ${ANGLE[topic.slug as TopicSlug] ?? ""}
 
@@ -98,10 +115,12 @@ This reader wants to learn something durable. They do not want news.
 - If the piece reports an event but explains a durable technique underneath it, do not skip; write about the technique and ignore the event.
 - "headline": under 60 characters, states the idea, not the event.
 - "takeaway": one sentence, under 25 words, the thing worth remembering.
-- "points": the body of the note, and the reason it exists. Write as many bullets as this
+${feedback
+  ? '- "points": use 3-6 short bullets that explain the basic idea and walk through one small example. Each bullet should be easy to understand on its own. Prefer clarity over covering every advanced detail.'
+  : `- "points": the body of the note, and the reason it exists. Write as many bullets as this
   particular piece actually needs, and no more: a simple idea may take 4, a dense one 15. Do not
   pad to a number and do not stop early while a load-bearing part is still unexplained.
-  Together they must teach the thing well enough that the reader never has to open the source.
+  Together they must teach the thing well enough that the reader never has to open the source.`}
 - Every bullet carries one idea and a concrete detail: the real API or option name, the number,
   the default, the order things run in, the exact error, the specific case that breaks. A bullet
   that could be guessed from the headline is worth nothing, so cut it.
@@ -110,6 +129,7 @@ This reader wants to learn something durable. They do not want news.
   vague: keep the precise technical noun and explain it, never swap it for something fuzzier.
 - Order the bullets so they build: what it is, how it works, then where it bites.
 - "deeper": one short sentence naming the specific question to chase next. Empty string if there is none.
+${feedback ? '- Leave "deeper" empty. Keep attention on understanding the current chapter.' : ""}
 - Plain text only. No markdown, no emoji, no HTML.`;
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -146,7 +166,11 @@ This reader wants to learn something durable. They do not want news.
       },
       messages: [{ role: "user", content: prompt }],
     }),
+  }).catch((error) => {
+    console.error("openrouter", String(error));
+    return null;
   });
+  if (!response) return null;
 
   if (!response.ok) {
     console.error("openrouter", response.status, await response.text());

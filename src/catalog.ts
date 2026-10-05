@@ -110,12 +110,5 @@ export async function catalogCandidates(env: Env, source: CatalogSource): Promis
     }
   }
 
-  const pending = await unseen(env, source.name);
-  if (pending.length > 0) return pending;
-
-  // Docs are evergreen: once a source has been read end to end, start the pass over.
-  await env.DB.prepare("DELETE FROM seen WHERE url IN (SELECT url FROM catalog WHERE source = ?)")
-    .bind(source.name)
-    .run();
   return await unseen(env, source.name);
 }

@@ -13,6 +13,5 @@ export interface Topic {
   slug: string;
   label: string;
   emoji: string;
-  level: number;
   last_sent_at: number | null;
 }

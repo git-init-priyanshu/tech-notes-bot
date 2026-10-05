@@ -13,14 +13,13 @@ export function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export function ratingKeyboard(postId: number, url: string) {
+export function lessonKeyboard(postId: number, url: string, completed = false) {
   return {
     inline_keyboard: [
       [{ text: "📖 Read the source", url }],
       [
-        { text: "😌 Easy", callback_data: `r:easy:${postId}` },
-        { text: "🙂 Medium", callback_data: `r:medium:${postId}` },
-        { text: "🤯 Hard", callback_data: `r:hard:${postId}` },
+        { text: completed ? "✅ Done" : "Done", callback_data: `done:${postId}` },
+        { text: "Explain more", callback_data: `explain:${postId}` },
       ],
     ],
   };
@@ -32,7 +31,7 @@ const TELEGRAM_TEXT_LIMIT = 4096;
 
 export function renderPost(topic: Topic, note: Note, source: string, url: string): string {
   const head = [
-    `${topic.emoji} <b>${escapeHtml(topic.label)}</b> \u00b7 level ${topic.level.toFixed(1)}`,
+    `${topic.emoji} <b>${escapeHtml(topic.label)}</b>`,
     "",
     `<b>${escapeHtml(note.headline)}</b>`,
     escapeHtml(note.takeaway),
@@ -83,22 +82,17 @@ export async function answerCallback(env: Env, callbackId: string, text: string)
   await api(env, "answerCallbackQuery", { callback_query_id: callbackId, text });
 }
 
-export async function markRated(
+export async function markCompleted(
   env: Env,
   chatId: number,
   messageId: number,
+  postId: number,
   url: string,
-  chosen: string,
 ): Promise<void> {
   await api(env, "editMessageReplyMarkup", {
     chat_id: chatId,
     message_id: messageId,
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "📖 Read the source", url }],
-        [{ text: `✅ rated: ${chosen}`, callback_data: "noop" }],
-      ],
-    },
+    reply_markup: lessonKeyboard(postId, url, true),
   });
 }
 

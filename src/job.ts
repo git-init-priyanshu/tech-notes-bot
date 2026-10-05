@@ -2,8 +2,8 @@ import { catalogCandidates } from "./catalog";
 import type { Env, Topic } from "./env";
 import { parseFeed } from "./rss";
 import { SOURCES, type RssSource, type TopicSlug } from "./sources";
-import { summarize } from "./summarize";
-import { ratingKeyboard, renderPost, sendPost } from "./telegram";
+import { summarize, type Note } from "./summarize";
+import { lessonKeyboard, renderPost, sendPost } from "./telegram";
 
 const RECYCLE_AFTER_MS = 90 * 24 * 60 * 60 * 1000;
 const CANDIDATES_PER_RUN = 6;
@@ -111,9 +111,7 @@ async function gatherCandidates(env: Env, topic: Topic): Promise<Candidate[]> {
     }));
   }
 
-  const feeds = sources.filter(
-    (source): source is RssSource => source.kind === "rss" && (source.minLevel ?? 1) <= topic.level + 0.5,
-  );
+  const feeds = sources.filter((source): source is RssSource => source.kind === "rss");
   return await rssCandidates(env, feeds);
 }
 
@@ -121,33 +119,95 @@ export async function runOnce(env: Env, slug?: string): Promise<string> {
   const topic = await pickTopic(env, slug);
   if (!topic) return "no topic";
 
+  const pending = await env.DB.prepare(
+    `SELECT id, url, title, source, text_url, format, note, sent_at, days_without_done, explain_count FROM posts
+     WHERE topic = ? AND completed_at IS NULL AND message_id IS NOT NULL
+     ORDER BY sent_at ASC LIMIT 1`,
+  ).bind(topic.slug).first<{
+    id: number; url: string; title: string; source: string; text_url: string | null;
+    format: string | null; note: string | null; sent_at: number;
+    days_without_done: number; explain_count: number;
+  }>();
+  if (pending) {
+    const now = Date.now();
+    const offset = Number(env.TZ_OFFSET_MINUTES) * 60_000;
+    if (topic.last_sent_at !== null &&
+        Math.floor((topic.last_sent_at + offset) / 86_400_000) >= Math.floor((now + offset) / 86_400_000)) {
+      return `${topic.slug}: finish the current lesson with Done first`;
+    }
+    if (!pending.note) return `${topic.slug}: unfinished lesson has no saved note`;
+
+    const daysWithoutDone = Math.max(pending.days_without_done,
+      Math.floor((now + offset) / 86_400_000) - Math.floor((pending.sent_at + offset) / 86_400_000));
+    await env.DB.prepare("UPDATE posts SET days_without_done = ? WHERE id = ? AND completed_at IS NULL")
+      .bind(daysWithoutDone, pending.id).run();
+    const generated = await summarize(env, topic, {
+      title: pending.title,
+      url: pending.url,
+      textUrl: pending.text_url ?? pending.url,
+      description: pending.note,
+      source: pending.source,
+      format: pending.format === "markdown" ? "markdown" : "html",
+      published: pending.sent_at,
+    }, {
+      mode: "repeat",
+      previousNote: pending.note,
+      daysWithoutDone,
+      explainCount: pending.explain_count,
+    });
+    const note = generated && !generated.skip ? generated : JSON.parse(pending.note) as Note;
+    if (!generated || generated.skip) console.error("simpler explanation failed", topic.slug);
+    const current = await env.DB.prepare("SELECT completed_at FROM posts WHERE id = ?")
+      .bind(pending.id).first<{ completed_at: number | null }>();
+    if (!current || current.completed_at !== null) return `${topic.slug}: lesson already completed`;
+    const messageId = await sendPost(
+      env,
+      renderPost(topic, note, pending.source, pending.url),
+      lessonKeyboard(pending.id, pending.url),
+    );
+    if (messageId === null) return "telegram send failed";
+
+    await env.DB.batch([
+      env.DB.prepare("UPDATE posts SET message_id = ?, note = ?, summary = ? WHERE id = ?")
+        .bind(messageId, JSON.stringify(note), note.headline, pending.id),
+      env.DB.prepare("UPDATE topics SET last_sent_at = ? WHERE slug = ?").bind(now, topic.slug),
+    ]);
+    return `${topic.slug}: repeated unfinished lesson "${note.headline}"`;
+  }
+
+  const isCatalog = SOURCES[topic.slug as TopicSlug]?.some((source) => source.kind === "catalog");
   const candidates = await gatherCandidates(env, topic);
   if (candidates.length === 0) return `${topic.slug}: no fresh candidates`;
 
   for (const candidate of candidates.slice(0, CANDIDATES_PER_RUN)) {
-    // A null note means the call itself failed, so the article stays unseen and comes back
-    // round. Only a real verdict, sent or skipped, retires it.
     const note = await summarize(env, topic, candidate);
-    if (!note) continue;
-    await env.DB.prepare("INSERT OR IGNORE INTO seen (url, seen_at) VALUES (?, ?)")
-      .bind(candidate.url, Date.now())
-      .run();
-    if (note.skip) continue;
+    if (!note) {
+      if (isCatalog) return `${topic.slug}: lesson generation failed; chapter unchanged`;
+      continue;
+    }
+    if (note.skip) {
+      await env.DB.prepare("INSERT OR IGNORE INTO seen (url, seen_at) VALUES (?, ?)")
+        .bind(candidate.url, Date.now()).run();
+      continue;
+    }
 
     const row = await env.DB.prepare(
-      `INSERT INTO posts (topic, url, title, source, summary, level, sent_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      `INSERT INTO posts (topic, url, title, source, summary, text_url, format, note, sent_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     )
-      .bind(topic.slug, candidate.url, candidate.title, candidate.source, note.headline, topic.level, Date.now())
+      .bind(topic.slug, candidate.url, candidate.title, candidate.source, note.headline, candidate.textUrl, candidate.format, JSON.stringify(note), Date.now())
       .first<{ id: number }>();
     if (!row) return "insert failed";
 
     const messageId = await sendPost(
       env,
       renderPost(topic, note, candidate.source, candidate.url),
-      ratingKeyboard(row.id, candidate.url),
+      lessonKeyboard(row.id, candidate.url),
     );
-    if (messageId === null) return "telegram send failed";
+    if (messageId === null) {
+      await env.DB.prepare("DELETE FROM posts WHERE id = ?").bind(row.id).run();
+      return "telegram send failed";
+    }
 
     await env.DB.batch([
       env.DB.prepare("UPDATE posts SET message_id = ? WHERE id = ?").bind(messageId, row.id),

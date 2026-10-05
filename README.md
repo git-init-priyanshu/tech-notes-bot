@@ -1,12 +1,14 @@
 # tech-notes-bot
 
 A Telegram bot that pushes 5 short technical notes a day, each with a link back to the source
-it came from. You rate a note Easy / Medium / Hard and the next note in that topic gets harder
-or easier.
+it came from. Press Done to complete a lesson, or Explain more for a fuller explanation of
+the same chapter.
 
 Runs entirely on Cloudflare Workers and D1: an hourly Cron Trigger looks up which topic that
-hour is for, picks an unread article, summarises it through OpenRouter, and sends it to
-Telegram. Button presses come back through a webhook and move that topic's difficulty level.
+hour is for, picks the next lesson, summarises it through OpenRouter, and sends it to Telegram.
+A topic repeats its unfinished lesson each day until Done is clicked, then sends its next
+lesson at the next scheduled time.
+Explain more leaves progress unchanged.
 
 It teaches; it does not report. The model is told to skip launches, releases, funding, hiring
 posts, changelogs, benchmarks and conference recaps outright.
@@ -23,8 +25,8 @@ That is one each of JavaScript, React, AI, backend and system design. The table 
 `src/schedule.ts`; edit it and the daily mix changes with it. The cron stays hourly either way,
 and an hour with no entry just returns early.
 
-Topics: `javascript`, `react`, `backend`, `systemdesign`, `ai`, and `systems`. Each carries a
-level from 1 to 5 (starts at 2.5). `systems` has no scheduled slot and is only reachable through
+Topics: `javascript`, `react`, `backend`, `systemdesign`, `ai`, and `systems`.
+`systems` has no scheduled slot and is only reachable through
 `/next systems`.
 
 ## Where the notes come from
@@ -35,9 +37,9 @@ Two kinds of source:
   `javascript` reads the 175 lessons of [javascript.info](https://javascript.info); `react`
   reads the 179 pages of [react.dev](https://react.dev) via its `llms.txt` index, pulling the
   raw `.md` behind each page. The list is cached in D1 and refreshed monthly. Once a site has
-  been read end to end the pass starts over.
-- **Feeds** are RSS, used for `backend`, `systemdesign`, `ai` and `systems`. A feed with a
-  `minLevel` stays hidden until your level for that topic reaches it.
+  been completed end to end, no further lessons are sent.
+- **Feeds** are RSS, used for `backend`, `systemdesign`, `ai` and `systems`. These still select
+  the newest unread articles; ordered curricula for these topics are a proposed next change.
 
 Each topic also carries an angle that steers the summary. `ai` is pointed at what companies
 hiring AI engineers actually expect: retrieval and RAG quality, evaluation harnesses and error
@@ -47,15 +49,36 @@ observability. `backend` is pointed at API design judgement. Both live in `src/s
 ## Each run
 
 1. Cron fires hourly. If the local hour has no slot, it returns without sending.
-2. Looks up that hour's topic and gathers candidates it has not already sent.
-3. Sends the first candidate's full text to the model with a brief written for your current
-   level. The model can answer `skip: true`, in which case the next candidate is tried (up to 6
-   per run).
-4. Sends the note with a source button and three rating buttons.
-5. A rating updates the level: Easy `+0.6`, Medium `+0.05`, Hard `-0.5`, clamped to 1-5.
-   The level changes both the writing brief and which feeds are eligible.
+2. If the topic has an unfinished lesson, it rewrites that chapter more simply on the next
+   local day. More days without Done and more Explain more clicks ask for fewer ideas, shorter
+   sentences, defined prerequisites, and one small worked example. If rewriting fails, the
+   saved note is resent instead.
+   Repeats share the same completion state and do not count as new lessons in stats.
+   Further runs that day wait for Done without sending another copy.
+3. Picks the next unfinished catalog chapter, or the newest unread feed article.
+4. Sends the source text to the model. News, index pages, and unsuitable material can be skipped.
+   A failed catalog summary leaves that chapter in place for the next attempt.
+5. Sends the note with Read the source, Done, and Explain more buttons.
+6. Done records completion. The next scheduled run sends the next lesson. Repeated clicks do
+   not advance extra chapters. Explain more sends a worked explanation of the same source.
 
-Commands: `/next [topic]`, `/level`, `/stats`, `/help`.
+Commands: `/next [topic]`, `/chapters [topic] [page]`, `/stats`, `/help`. `/next` sends a lesson
+immediately when the topic has no unfinished lesson, or repeats its unfinished lesson if it
+has not been sent that local day. It does not bypass Done.
+
+`/chapters` shows the current or next chapter against each topic. `/chapters javascript` or `/chapters react`
+shows 15 chapters at a time in curriculum order, marked Done, Current, Skipped, or Upcoming.
+Use `/chapters javascript 2` for the next page. Feed topics report that their chapter lists
+are not enabled yet. Chapter lists show days without Done and Explain more counts.
+Listing chapters does not change progress.
+
+`posts.days_without_done` starts at zero and records elapsed local calendar days since the
+lesson was first sent. Repeats keep that original date; completion freezes the count.
+`posts.explain_count` counts button presses even when generating an explanation fails.
+`explanation_clicks` records Telegram callback IDs so webhook retries do not double-count a
+click. New lessons start both counters at zero. `/stats` includes total explanation clicks.
+
+The topic chapter outlines are in [docs/topic-chapters.md](docs/topic-chapters.md).
 
 ## Deploy
 
@@ -91,9 +114,12 @@ Paste the printed `database_id` into `wrangler.toml`, then create the tables:
 npm run db:init
 ```
 
-Upgrading an existing install instead? Run `npm run db:migrate`. It adds the catalog table and
-splits the old `frontend` topic into `javascript` and `react`, carrying the level it had learned
-across to both.
+Upgrading an existing install instead? Run `npm run db:migrate` before deploying this version.
+It applies the catalog, lesson completion, and learning feedback migrations. Existing sent lessons
+count as completed, preserving the current chapter position. The new buttons appear on newly
+sent lessons; old rating buttons direct you to `/next`. For local upgrades, use
+`npm run db:migrate:local`. Fresh databases created from `schema.sql` already have the new
+columns and do not need these historical migrations.
 
 ### 5. Set the secrets
 
@@ -136,9 +162,8 @@ The cron in `[triggers]` is `"30 * * * *"`, chosen so that UTC `:30` lands on th
 If you change `TZ_OFFSET_MINUTES`, move the cron minute to match, or the hours in
 `src/schedule.ts` will drift off the hour.
 
-Which topic each hour gets is `SCHEDULE` in `src/schedule.ts`. Sources are `src/sources.ts`;
-`minLevel` gates a feed until your level reaches it, which is how Marc Brooker and Brendan Gregg
-stay out of the way until you have asked for harder material.
+Which topic each hour gets is `SCHEDULE` in `src/schedule.ts`. Sources are `src/sources.ts`.
+All configured feeds are eligible; there are no difficulty levels or feed gates.
 
 ## Cost
 

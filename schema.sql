@@ -2,25 +2,35 @@ CREATE TABLE IF NOT EXISTS topics (
   slug         TEXT PRIMARY KEY,
   label        TEXT NOT NULL,
   emoji        TEXT NOT NULL,
-  level        REAL NOT NULL DEFAULT 2.5,
   last_sent_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS posts (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  topic      TEXT NOT NULL,
-  url        TEXT NOT NULL,
-  title      TEXT NOT NULL,
-  source     TEXT NOT NULL,
-  summary    TEXT NOT NULL,
-  level      REAL NOT NULL,
-  message_id INTEGER,
-  sent_at    INTEGER NOT NULL,
-  rating     TEXT,
-  rated_at   INTEGER
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic        TEXT NOT NULL,
+  url          TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  source       TEXT NOT NULL,
+  summary      TEXT NOT NULL,
+  text_url     TEXT,
+  format       TEXT,
+  note         TEXT,
+  message_id   INTEGER,
+  sent_at      INTEGER NOT NULL,
+  completed_at INTEGER,
+  days_without_done INTEGER NOT NULL DEFAULT 0,
+  explain_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS posts_topic_sent ON posts (topic, sent_at DESC);
+
+CREATE TABLE IF NOT EXISTS explanation_clicks (
+  callback_id TEXT PRIMARY KEY,
+  post_id     INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  clicked_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS explanation_clicks_post ON explanation_clicks (post_id);
 
 CREATE TABLE IF NOT EXISTS seen (
   url     TEXT PRIMARY KEY,
