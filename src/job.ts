@@ -1,4 +1,5 @@
 import { catalogCandidates } from "./catalog";
+import { chapterProgress, CURRICULUM_TOPICS } from "./curriculum";
 import type { Env, Topic } from "./env";
 import { parseFeed } from "./rss";
 import { SOURCES, type RssSource, type TopicSlug } from "./sources";
@@ -47,6 +48,9 @@ export interface Candidate {
   source: string;
   format: "html" | "markdown";
   published: number;
+  chapterId?: string;
+  objective?: string;
+  section?: string | string[];
 }
 
 async function pickTopic(env: Env, slug?: string): Promise<Topic | null> {
@@ -96,6 +100,16 @@ async function rssCandidates(env: Env, feeds: RssSource[]): Promise<Candidate[]>
 }
 
 async function gatherCandidates(env: Env, topic: Topic): Promise<Candidate[]> {
+  if (CURRICULUM_TOPICS.includes(topic.slug)) {
+    const chapters = await chapterProgress(env, topic.slug);
+    const next = chapters.find((chapter) => !chapter.completed);
+    return next ? [{
+      ...next,
+      chapterId: next.id,
+      description: next.objective,
+      published: 0,
+    }] : [];
+  }
   const sources = SOURCES[topic.slug as TopicSlug] ?? [];
   const catalogs = sources.filter((source) => source.kind === "catalog");
   if (catalogs.length > 0) {
@@ -120,13 +134,13 @@ export async function runOnce(env: Env, slug?: string): Promise<string> {
   if (!topic) return "no topic";
 
   const pending = await env.DB.prepare(
-    `SELECT id, url, title, source, text_url, format, note, sent_at, days_without_done, explain_count FROM posts
-     WHERE topic = ? AND completed_at IS NULL AND message_id IS NOT NULL
+    `SELECT id, url, title, source, text_url, format, note, sent_at, days_without_done, explain_count, chapter_id FROM posts
+     WHERE topic = ? AND completed_at IS NULL AND retired_at IS NULL AND message_id IS NOT NULL
      ORDER BY sent_at ASC LIMIT 1`,
   ).bind(topic.slug).first<{
     id: number; url: string; title: string; source: string; text_url: string | null;
     format: string | null; note: string | null; sent_at: number;
-    days_without_done: number; explain_count: number;
+    days_without_done: number; explain_count: number; chapter_id: string | null;
   }>();
   if (pending) {
     const now = Date.now();
@@ -141,6 +155,7 @@ export async function runOnce(env: Env, slug?: string): Promise<string> {
       Math.floor((now + offset) / 86_400_000) - Math.floor((pending.sent_at + offset) / 86_400_000));
     await env.DB.prepare("UPDATE posts SET days_without_done = ? WHERE id = ? AND completed_at IS NULL")
       .bind(daysWithoutDone, pending.id).run();
+    const chapter = pending.chapter_id ? (await chapterProgress(env, topic.slug)).find((chapter) => chapter.id === pending.chapter_id) : undefined;
     const generated = await summarize(env, topic, {
       title: pending.title,
       url: pending.url,
@@ -149,6 +164,9 @@ export async function runOnce(env: Env, slug?: string): Promise<string> {
       source: pending.source,
       format: pending.format === "markdown" ? "markdown" : "html",
       published: pending.sent_at,
+      chapterId: pending.chapter_id ?? undefined,
+      objective: chapter?.objective,
+      section: chapter?.section,
     }, {
       mode: "repeat",
       previousNote: pending.note,
@@ -175,27 +193,39 @@ export async function runOnce(env: Env, slug?: string): Promise<string> {
     return `${topic.slug}: repeated unfinished lesson "${note.headline}"`;
   }
 
+  const isCurriculum = Boolean(CURRICULUM_TOPICS.includes(topic.slug));
   const isCatalog = SOURCES[topic.slug as TopicSlug]?.some((source) => source.kind === "catalog");
+  if (isCurriculum) {
+    const offset = Number(env.TZ_OFFSET_MINUTES) * 60_000;
+    const today = Math.floor((Date.now() + offset) / 86_400_000);
+    const completed = await env.DB.prepare("SELECT MAX(read_at) AS read_at FROM chapters WHERE topic = ?")
+      .bind(topic.slug).first<{ read_at: number | null }>();
+    if ((completed?.read_at != null && Math.floor((completed.read_at + offset) / 86_400_000) >= today) ||
+        (topic.last_sent_at !== null && Math.floor((topic.last_sent_at + offset) / 86_400_000) >= today)) {
+      return `${topic.slug}: the next chapter is available tomorrow`;
+    }
+  }
   const candidates = await gatherCandidates(env, topic);
   if (candidates.length === 0) return `${topic.slug}: no fresh candidates`;
 
   for (const candidate of candidates.slice(0, CANDIDATES_PER_RUN)) {
     const note = await summarize(env, topic, candidate);
     if (!note) {
-      if (isCatalog) return `${topic.slug}: lesson generation failed; chapter unchanged`;
+      if (isCatalog || isCurriculum) return `${topic.slug}: lesson generation failed; chapter unchanged`;
       continue;
     }
     if (note.skip) {
+      if (isCurriculum) return `${topic.slug}: chapter generation declined; chapter unchanged`;
       await env.DB.prepare("INSERT OR IGNORE INTO seen (url, seen_at) VALUES (?, ?)")
         .bind(candidate.url, Date.now()).run();
       continue;
     }
 
     const row = await env.DB.prepare(
-      `INSERT INTO posts (topic, url, title, source, summary, text_url, format, note, sent_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      `INSERT INTO posts (topic, url, title, source, summary, text_url, format, note, sent_at, chapter_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     )
-      .bind(topic.slug, candidate.url, candidate.title, candidate.source, note.headline, candidate.textUrl, candidate.format, JSON.stringify(note), Date.now())
+      .bind(topic.slug, candidate.url, candidate.title, candidate.source, note.headline, candidate.textUrl, candidate.format, JSON.stringify(note), Date.now(), candidate.chapterId ?? null)
       .first<{ id: number }>();
     if (!row) return "insert failed";
 

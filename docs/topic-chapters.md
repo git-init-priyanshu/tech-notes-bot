@@ -2,15 +2,15 @@
 
 `/chapters` shows the current unfinished chapter, or the next catalog entry, for each topic.
 The actual next title depends on your saved progress. This document describes the order and
-proposed curricula; it does not claim to show the live database's current chapter.
+active curricula; it does not claim to show the live database's current chapter.
 
 | Topic | Current source selection | Start of a new pass |
 | --- | --- | --- |
 | JavaScript | Ordered javascript.info catalog | An Introduction to JavaScript |
 | React | Ordered react.dev documentation index | Quick Start |
-| AI | Feeds; proposed ordered curriculum below | Proposed: training versus inference |
-| Backend | Feeds; proposed ordered curriculum below | Proposed: HTTP request lifecycle |
-| System design | Feeds; proposed ordered curriculum below | Proposed: requirements and capacity estimates |
+| AI | Fixed 30-chapter curriculum | Training versus inference |
+| Backend | Fixed 16-chapter curriculum | HTTP request lifecycle |
+| System design | Fixed 18-chapter curriculum | Requirements and capacity estimates |
 | Systems | Feeds, manual `/next systems` only | No fixed curriculum proposed |
 
 ## JavaScript: current catalog
@@ -56,10 +56,10 @@ These areas summarize the source order. Use `/chapters react [page]` for exact l
 11. Browser rendering, hydration, and server rendering APIs.
 12. Compiler, development tools, and hooks lint reference.
 
-## AI: proposed curriculum
+## AI: active curriculum
 
 The [YC job research and reading plan](ai-engineer-yc-jobs.md) maps these chapters to specific
-blogs, courses, and documentation. These chapters are proposed; AI still selects feed articles.
+blogs, courses, and documentation. The bot sends these 30 chapters in order.
 
 1. Training versus inference.
 2. Tokens and context windows.
@@ -95,49 +95,50 @@ blogs, courses, and documentation. These chapters are proposed; AI still selects
 Optional advanced branches: fine-tuning and dataset curation; LoRA; reward-based adaptation;
 real-time voice; and open-model GPU serving. Select a branch after completing the core path.
 
-## Backend: proposed curriculum
+## Backend: active curriculum
 
-Suggested order informed by the [backend roadmap](https://roadmap.sh/backend). These chapters
-are a proposal, not the roadmap's exact chapter titles. Backend still selects feed articles.
+The bot sends these 16 chapters in order. Each chapter's source and objective are defined in
+[the curriculum migration](../migrations/0005_seed_chapters.sql).
 
-1. HTTP request lifecycle, methods, headers, and status codes.
-2. API resources and request/response contracts.
-3. Input validation and consistent error responses.
+
+1. HTTP request lifecycle.
+2. API resources and contracts.
+3. Input validation and error responses.
 4. Relational data modeling and constraints.
-5. SQL joins, indexes, and query plans.
-6. Transactions, isolation, and concurrent updates.
-7. Authentication, sessions, and authorization.
-8. Pagination, filtering, and API versioning.
-9. Idempotency and safe retries.
-10. Caching, invalidation, and freshness.
-11. Queues, background jobs, and delivery guarantees.
-12. Rate limits, timeouts, and backpressure.
-13. Service observability and failure diagnosis.
-14. Integration tests, deployments, migrations, and rollback.
-15. API security and multi-tenant data boundaries.
-16. Scaling services and choosing service boundaries.
+5. SQL joins and query plans.
+6. Indexes and access patterns.
+7. Transactions and concurrent updates.
+8. Authentication and authorization.
+9. Pagination, filtering, and versioning.
+10. Idempotency and safe retries.
+11. Caching and freshness.
+12. Queues and delivery guarantees.
+13. Timeouts, rate limits, and backpressure.
+14. Service observability and debugging.
+15. API security and tenant boundaries.
+16. Scaling and service boundaries.
 
-## System design: proposed curriculum
+## System design: active curriculum
 
-Suggested order informed by the [System Design Primer](https://github.com/donnemartin/system-design-primer).
-These chapters are a proposal rather than its exact section order. System design still selects
-feed articles.
+The bot sends these 18 chapters in order. Each chapter's source and objective are defined in
+[the curriculum migration](../migrations/0005_seed_chapters.sql).
 
-1. Functional requirements, constraints, and capacity estimates.
-2. Latency, throughput, availability, and bottlenecks.
-3. Network paths: DNS, proxies, and load balancing.
+
+1. Requirements and capacity estimates.
+2. Latency, throughput, and bottlenecks.
+3. DNS, proxies, and load balancing.
 4. Stateless services and horizontal scaling.
-5. Database choice and data access patterns.
+5. Database choice and access patterns.
 6. Indexing and storage trade-offs.
 7. Caching and invalidation.
 8. Replication and consistency.
 9. Partitioning and sharding.
-10. Queues, asynchronous work, and backpressure.
-11. Distributed failures, retries, and idempotency.
-12. Coordination, leader election, and consensus concepts.
+10. Queues and backpressure.
+11. Distributed failures and retries.
+12. Coordination and consensus concepts.
 13. Rate limiting and overload protection.
-14. Observability, disaster recovery, and reliability targets.
+14. Observability and disaster recovery.
 15. Case study: URL shortener.
-16. Case study: messaging or notification service.
-17. Case study: news feed or search service.
-18. Revisit designs under changing scale and consistency constraints.
+16. Case study: notification service.
+17. Case study: news feed.
+18. Revisit designs under changing constraints.

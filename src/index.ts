@@ -1,4 +1,5 @@
 import { catalogCandidates } from "./catalog";
+import { chapterProgress, CURRICULUM_TOPICS } from "./curriculum";
 import type { Env, Topic } from "./env";
 import { runOnce } from "./job";
 import { slotFor } from "./schedule";
@@ -42,9 +43,16 @@ async function handleLesson(env: Env, query: NonNullable<Update["callback_query"
       sent_at: number;
       days_without_done: number;
       explain_count: number;
+      chapter_id: string | null;
+      retired_at: number | null;
     }>();
   if (!post) {
     await answerCallback(env, query.id, "That lesson is gone.");
+    return;
+  }
+
+  if (post.retired_at !== null) {
+    await answerCallback(env, query.id, "This feed lesson is retired. Use /next to start the chapter curriculum.");
     return;
   }
 
@@ -57,8 +65,11 @@ async function handleLesson(env: Env, query: NonNullable<Update["callback_query"
     await env.DB.batch([
       env.DB.prepare("UPDATE posts SET completed_at = ?, days_without_done = ? WHERE id = ? AND completed_at IS NULL")
         .bind(now, daysWithoutDone, Number(id)),
-      env.DB.prepare("INSERT OR IGNORE INTO seen (url, seen_at) VALUES (?, ?)")
-        .bind(post.url, Date.now()),
+      ...(post.chapter_id
+        ? [env.DB.prepare("UPDATE chapters SET read_at = ? WHERE id = ? AND read_at IS NULL")
+          .bind(now, post.chapter_id)]
+        : [env.DB.prepare("INSERT OR IGNORE INTO seen (url, seen_at) VALUES (?, ?)")
+          .bind(post.url, now)]),
     ]);
     await answerCallback(env, query.id, post.completed_at !== null
       ? "Already completed."
@@ -88,6 +99,7 @@ async function handleLesson(env: Env, query: NonNullable<Update["callback_query"
   }
   const explainCount = Number(clicked[1].results[0]?.explain_count ?? post.explain_count);
   await answerCallback(env, query.id, "Preparing a simpler explanation...");
+  const chapter = post.chapter_id ? (await chapterProgress(env, post.topic)).find((chapter) => chapter.id === post.chapter_id) : undefined;
   const note = await summarize(env, topic, {
     title: post.title,
     url: post.url,
@@ -96,6 +108,9 @@ async function handleLesson(env: Env, query: NonNullable<Update["callback_query"
     source: post.source,
     format: post.format === "markdown" ? "markdown" : "html",
     published: 0,
+    chapterId: post.chapter_id ?? undefined,
+    objective: chapter?.objective,
+    section: chapter?.section,
   }, {
     mode: "explain",
     previousNote: post.note ?? post.summary,
@@ -123,7 +138,7 @@ async function handleChapters(env: Env, slug?: string, pageArgument?: string): P
     for (const topic of results) {
       const pending = await env.DB.prepare(
         `SELECT title, sent_at, days_without_done, explain_count FROM posts
-         WHERE topic = ? AND completed_at IS NULL AND message_id IS NOT NULL
+         WHERE topic = ? AND completed_at IS NULL AND retired_at IS NULL AND message_id IS NOT NULL
          ORDER BY sent_at ASC LIMIT 1`,
       ).bind(topic.slug).first<{
         title: string; sent_at: number; days_without_done: number; explain_count: number;
@@ -132,6 +147,13 @@ async function handleChapters(env: Env, slug?: string, pageArgument?: string): P
         const days = Math.max(pending.days_without_done, today - Math.floor((pending.sent_at + offset) / 86_400_000));
         lines.push(`<b>${escapeHtml(topic.label)}</b>: ${escapeHtml(pending.title.slice(0, 80))} [Current]`,
           `${days} days without Done · ${pending.explain_count} Explain more clicks`);
+        continue;
+      }
+      if (CURRICULUM_TOPICS.includes(topic.slug)) {
+        const chapters = await chapterProgress(env, topic.slug);
+        const next = chapters.find((chapter) => !chapter.completed);
+        lines.push(`<b>${escapeHtml(topic.label)}</b>: ${next ? escapeHtml(next.title) : "Curriculum completed"}`,
+          `/chapters ${topic.slug} [page]`);
         continue;
       }
       const catalogs = (SOURCES[topic.slug as TopicSlug] ?? []).filter((source) => source.kind === "catalog");
@@ -153,9 +175,10 @@ async function handleChapters(env: Env, slug?: string, pageArgument?: string): P
     await sendPlain(env, "Unknown topic. Use /chapters to see available chapter lists.");
     return;
   }
+  const curriculum = CURRICULUM_TOPICS.includes(slug);
   const catalogs = (SOURCES[slug as TopicSlug] ?? []).filter((source) => source.kind === "catalog");
-  if (catalogs.length === 0) {
-    await sendPlain(env, `${escapeHtml(topic.label)} still uses feeds. Its chapter list is not enabled yet.`);
+  if (!curriculum && catalogs.length === 0) {
+    await sendPlain(env, `${escapeHtml(topic.label)} uses feeds and has no fixed chapter list.`);
     return;
   }
   const page = Number(pageArgument ?? "1");
@@ -164,11 +187,13 @@ async function handleChapters(env: Env, slug?: string, pageArgument?: string): P
     return;
   }
 
+  const progress = curriculum ? await chapterProgress(env, slug) : [];
   await Promise.all(catalogs.map((source) => catalogCandidates(env, source)));
   const sources = catalogs.map((source) => source.name);
   const placeholders = sources.map(() => "?").join(",");
-  const total = await env.DB.prepare(`SELECT COUNT(*) AS count FROM catalog WHERE source IN (${placeholders})`)
-    .bind(...sources).first<{ count: number }>();
+  const total = curriculum ? { count: progress.length } : await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM catalog WHERE source IN (${placeholders})`,
+  ).bind(...sources).first<{ count: number }>();
   if (!total?.count) {
     await sendPlain(env, "Could not load the chapter list. Try again later.");
     return;
@@ -180,20 +205,29 @@ async function handleChapters(env: Env, slug?: string, pageArgument?: string): P
     return;
   }
 
-  const { results } = await env.DB.prepare(
-    `SELECT c.title,
-            EXISTS(SELECT 1 FROM posts p WHERE p.topic = ? AND p.url = c.url AND p.completed_at IS NOT NULL) AS completed,
-            EXISTS(SELECT 1 FROM posts p WHERE p.topic = ? AND p.url = c.url AND p.completed_at IS NULL AND p.message_id IS NOT NULL) AS current,
-            EXISTS(SELECT 1 FROM seen s WHERE s.url = c.url) AS seen,
-            COALESCE((SELECT MAX(p.days_without_done) FROM posts p WHERE p.topic = ? AND p.url = c.url), 0) AS days_without_done,
-            COALESCE((SELECT SUM(p.explain_count) FROM posts p WHERE p.topic = ? AND p.url = c.url), 0) AS explain_count
-     FROM catalog c WHERE c.source IN (${placeholders})
-     ORDER BY c.source, c.position, c.url LIMIT ? OFFSET ?`,
-  ).bind(slug, slug, slug, slug, ...sources, perPage, (page - 1) * perPage)
-    .all<{
-      title: string; completed: number; current: number; seen: number;
-      days_without_done: number; explain_count: number;
-    }>();
+  let results: Array<{
+    title: string; completed: number; current: number; seen: number;
+    days_without_done: number; explain_count: number;
+  }>;
+  if (curriculum) {
+    results = progress.slice((page - 1) * perPage, page * perPage);
+  } else {
+    const listed = await env.DB.prepare(
+      `SELECT c.title,
+              EXISTS(SELECT 1 FROM posts p WHERE p.topic = ? AND p.url = c.url AND p.completed_at IS NOT NULL) AS completed,
+              EXISTS(SELECT 1 FROM posts p WHERE p.topic = ? AND p.url = c.url AND p.completed_at IS NULL AND p.message_id IS NOT NULL) AS current,
+              EXISTS(SELECT 1 FROM seen s WHERE s.url = c.url) AS seen,
+              COALESCE((SELECT MAX(p.days_without_done) FROM posts p WHERE p.topic = ? AND p.url = c.url), 0) AS days_without_done,
+              COALESCE((SELECT SUM(p.explain_count) FROM posts p WHERE p.topic = ? AND p.url = c.url), 0) AS explain_count
+       FROM catalog c WHERE c.source IN (${placeholders})
+       ORDER BY c.source, c.position, c.url LIMIT ? OFFSET ?`,
+    ).bind(slug, slug, slug, slug, ...sources, perPage, (page - 1) * perPage)
+      .all<{
+        title: string; completed: number; current: number; seen: number;
+        days_without_done: number; explain_count: number;
+      }>();
+    results = listed.results;
+  }
 
   let message = `<b>${escapeHtml(topic.label)} chapters</b> · ${page}/${pages} · ${total.count} total`;
   for (const [index, chapter] of results.entries()) {

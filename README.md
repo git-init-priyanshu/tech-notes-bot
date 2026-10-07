@@ -38,8 +38,12 @@ Two kinds of source:
   reads the 179 pages of [react.dev](https://react.dev) via its `llms.txt` index, pulling the
   raw `.md` behind each page. The list is cached in D1 and refreshed monthly. Once a site has
   been completed end to end, no further lessons are sent.
-- **Feeds** are RSS, used for `backend`, `systemdesign`, `ai` and `systems`. These still select
-  the newest unread articles; ordered curricula for these topics are a proposed next change.
+- **Curricula** are fixed chapter lists for `ai` (30 chapters), `backend` (16), and
+  `systemdesign` (18). Each chapter has a stable ID, source, and learning objective in
+  the D1 `chapters` table. The migration seeds the ordered reading plan. Chapters advance
+  the day after Done. Source publication dates do not
+  affect selection, and two chapters can share an article without sharing completion.
+- **Feeds** are RSS and remain only for the unscheduled `systems` topic.
 
 Each topic also carries an angle that steers the summary. `ai` is pointed at what companies
 hiring AI engineers actually expect: retrieval and RAG quality, evaluation harnesses and error
@@ -55,7 +59,9 @@ observability. `backend` is pointed at API design judgement. Both live in `src/s
    saved note is resent instead.
    Repeats share the same completion state and do not count as new lessons in stats.
    Further runs that day wait for Done without sending another copy.
-3. Picks the next unfinished catalog chapter, or the newest unread feed article.
+3. Picks the first unfinished curriculum chapter or catalog lesson. Only `systems` selects
+   the newest unread feed article. Failed or declined curriculum summaries leave the chapter
+   in place, with no feed fallback.
 4. Sends the source text to the model. News, index pages, and unsuitable material can be skipped.
    A failed catalog summary leaves that chapter in place for the next attempt.
 5. Sends the note with Read the source, Done, and Explain more buttons.
@@ -64,16 +70,23 @@ observability. `backend` is pointed at API design judgement. Both live in `src/s
 
 Commands: `/next [topic]`, `/chapters [topic] [page]`, `/stats`, `/help`. `/next` sends a lesson
 immediately when the topic has no unfinished lesson, or repeats its unfinished lesson if it
-has not been sent that local day. It does not bypass Done.
+has not been sent that local day. For the three fixed curricula, it waits until the day
+after Done before serving the next chapter.
 
 `/chapters` shows the current or next chapter against each topic. `/chapters javascript` or `/chapters react`
 shows 15 chapters at a time in curriculum order, marked Done, Current, Skipped, or Upcoming.
-Use `/chapters javascript 2` for the next page. Feed topics report that their chapter lists
-are not enabled yet. Chapter lists show days without Done and Explain more counts.
+Use `/chapters javascript 2` for the next page. The same command supports `ai`, `backend`,
+and `systemdesign`. Chapter lists show days without Done and Explain more counts.
 Listing chapters does not change progress.
 
 `posts.days_without_done` starts at zero and records elapsed local calendar days since the
 lesson was first sent. Repeats keep that original date; completion freezes the count.
+`chapters` stores topic, position, title, source URLs, objective, selected sections, and
+`read_at`. A null `read_at` means unread. Done sets it once. `posts.chapter_id` attaches
+lesson history and counters to a chapter independently of its source URL.
+The ordered curriculum migration retires unfinished AI, backend, and system design feed
+posts without deleting their history or counters. Their old buttons report that the lesson
+has been retired. Each new curriculum starts at chapter 1; prior feed URLs do not skip chapters.
 `posts.explain_count` counts button presses even when generating an explanation fails.
 `explanation_clicks` records Telegram callback IDs so webhook retries do not double-count a
 click. New lessons start both counters at zero. `/stats` includes total explanation clicks.
@@ -115,7 +128,7 @@ npm run db:init
 ```
 
 Upgrading an existing install instead? Run `npm run db:migrate` before deploying this version.
-It applies the catalog, lesson completion, and learning feedback migrations. Existing sent lessons
+It applies the catalog, lesson completion, learning feedback, and ordered curriculum migrations. Existing sent lessons
 count as completed, preserving the current chapter position. The new buttons appear on newly
 sent lessons; old rating buttons direct you to `/next`. For local upgrades, use
 `npm run db:migrate:local`. Fresh databases created from `schema.sql` already have the new

@@ -19,10 +19,13 @@ CREATE TABLE IF NOT EXISTS posts (
   sent_at      INTEGER NOT NULL,
   completed_at INTEGER,
   days_without_done INTEGER NOT NULL DEFAULT 0,
-  explain_count INTEGER NOT NULL DEFAULT 0
+  explain_count INTEGER NOT NULL DEFAULT 0,
+  chapter_id TEXT,
+  retired_at INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS posts_topic_sent ON posts (topic, sent_at DESC);
+CREATE INDEX IF NOT EXISTS posts_topic_chapter ON posts (topic, chapter_id);
 
 CREATE TABLE IF NOT EXISTS explanation_clicks (
   callback_id TEXT PRIMARY KEY,
@@ -56,3 +59,18 @@ INSERT OR IGNORE INTO topics (slug, label, emoji) VALUES
   ('systemdesign', 'System Design', '🏗️'),
   ('ai',           'AI',            '🧠'),
   ('systems',      'Systems',       '🔩');
+
+CREATE TABLE IF NOT EXISTS chapters (
+  id TEXT PRIMARY KEY,
+  topic TEXT NOT NULL REFERENCES topics(slug),
+  position INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  text_url TEXT NOT NULL,
+  source TEXT NOT NULL,
+  format TEXT NOT NULL CHECK (format IN ('html', 'markdown')),
+  objective TEXT NOT NULL,
+  sections TEXT,
+  read_at INTEGER,
+  UNIQUE (topic, position)
+);

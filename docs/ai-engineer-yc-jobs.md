@@ -124,4 +124,4 @@ Sphere motivates chapters 31-33; Peppr motivates chapter 34; Eloquent's infrastr
 
 Replace the AI feed with an explicit ordered list of the 30 core chapters. Each entry should have a stable chapter ID, a title, a narrow learning objective, a source URL, and the relevant section of that source. Several chapters can use different sections of the same article. Completion must therefore track chapter IDs rather than only source URLs, or finishing one section would incorrectly finish every chapter sharing that article.
 
-Send one chapter at the AI slot. Done completes that chapter; Explain more adds examples from the same chapter. At the end of the core sequence, choose an advanced branch. This is a curriculum proposal; the bot's AI source selection has not been changed by this research.
+Send one chapter at the AI slot. Done completes that chapter; Explain more adds examples from the same chapter. At the end of the core sequence, stop until an advanced branch is configured. The bot now uses the 30 core chapters in the D1 `chapters` table. Advanced branches remain optional future additions.

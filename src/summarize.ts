@@ -41,12 +41,36 @@ async function articleText(candidate: Candidate): Promise<string> {
       headers: { "user-agent": USER_AGENT, accept: "text/html, text/plain, */*" },
       signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) return candidate.description;
-    const raw = await response.text();
+    if (!response.ok) return candidate.chapterId ? "" : candidate.description;
+    let raw = await response.text();
+    if (candidate.format === "html") {
+      raw = raw.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] ?? raw;
+    }
+    if (candidate.section) {
+      const headings = [...raw.matchAll(candidate.format === "markdown"
+        ? /^(#{1,6})[ \t]+(.+)$/gm
+        : /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)];
+      const sections = Array.isArray(candidate.section) ? candidate.section : [candidate.section];
+      const selectedText: string[] = [];
+      for (const section of sections) {
+        const index = headings.findIndex((heading) => stripTags(heading[2]).trim().toLowerCase() === section.toLowerCase());
+        if (index < 0) {
+          console.error("chapter source section missing", candidate.chapterId, section);
+          return "";
+        }
+        const selected = headings[index];
+        const level = candidate.format === "markdown" ? selected[1].length : Number(selected[1]);
+        const next = headings.slice(index + 1).find((heading) =>
+          (candidate.format === "markdown" ? heading[1].length : Number(heading[1])) <= level);
+        selectedText.push(raw.slice(selected.index, next?.index ?? raw.length));
+      }
+      raw = selectedText.join("\n\n");
+    }
     const body = candidate.format === "markdown" ? raw.replace(/\s+/g, " ").trim() : stripTags(raw);
+    if (candidate.chapterId) return body.length >= 80 ? body.slice(0, 14_000) : "";
     return body.length > 600 ? body.slice(0, 14_000) : candidate.description;
   } catch {
-    return candidate.description;
+    return candidate.chapterId ? "" : candidate.description;
   }
 }
 
@@ -77,11 +101,15 @@ export async function summarize(
   feedback?: LessonFeedback,
 ): Promise<Note | null> {
   const text = await articleText(candidate);
-  if (text.length < 300 && !feedback) return { skip: true, headline: "", takeaway: "", points: [], deeper: "" };
+  if (candidate.chapterId && text.length < 80 && !feedback) return null;
+  if (!candidate.chapterId && text.length < 300 && !feedback) return { skip: true, headline: "", takeaway: "", points: [], deeper: "" };
 
   const prompt = `You write a single push notification for one engineer's phone. Topic bucket: ${topic.label}.
 
 Teach a working developer in plain English. Define unfamiliar terms, explain the mechanism, and give concrete examples and trade-offs.
+${candidate.chapterId ? `Assigned curriculum chapter: ${candidate.title}
+Learning objective: ${candidate.objective}
+Teach only this objective from the supplied source. Ignore news and other sections. Keep the assigned chapter title. This is an ordered lesson, so do not skip it or introduce the next chapter.` : ""}
 ${feedback ? `This is the same chapter, not a new lesson. This chapter has ${feedback.daysWithoutDone} recorded local calendar days without Done and ${feedback.explainCount} Explain more clicks.
 ${feedback.mode === "repeat" ? "Rewrite the lesson so it is much easier to digest than the previous note." : "Explain this chapter again using a clearer worked example and step-by-step reasoning."}
 Treat these counts as signals that the presentation may be too difficult, not as proof of the reader's ability. As the counts grow, introduce fewer ideas at once, define prerequisites, and use shorter sentences. Start with the basic idea, show one small concrete example, then explain why it works. Keep the facts accurate and stay on this chapter. Do not add advanced tangents. Do not skip this lesson.
@@ -185,5 +213,7 @@ ${feedback ? '- Leave "deeper" empty. Keep attention on understanding the curren
     console.error("openrouter", payload.error.message);
     return null;
   }
-  return parseJson(payload.choices?.[0]?.message?.content ?? "");
+  const note = parseJson(payload.choices?.[0]?.message?.content ?? "");
+  if (note && candidate.chapterId && !note.skip) note.headline = candidate.title;
+  return note;
 }
