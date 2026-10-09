@@ -66,7 +66,10 @@ observability. `backend` is pointed at API design judgement. Both live in `src/s
    A failed catalog summary leaves that chapter in place for the next attempt.
 5. Sends the note with Read the source, Done, and Explain more buttons.
 6. Done records completion. The next scheduled run sends the next lesson. Repeated clicks do
-   not advance extra chapters. Explain more sends a worked explanation of the same source.
+   not advance extra chapters. Explain more adds source details and worked examples for the
+   same chapter. Long explanations arrive in numbered parts without dropping pointers.
+   Later clicks receive up to five recent successful explanations so they can cover new
+   details. If the source cannot be loaded, the bot asks you to retry.
 
 Commands: `/next [topic]`, `/chapters [topic] [page]`, `/stats`, `/help`. `/next` sends a lesson
 immediately when the topic has no unfinished lesson, or repeats its unfinished lesson if it
@@ -89,7 +92,8 @@ posts without deleting their history or counters. Their old buttons report that 
 has been retired. Each new curriculum starts at chapter 1; prior feed URLs do not skip chapters.
 `posts.explain_count` counts button presses even when generating an explanation fails.
 `explanation_clicks` records Telegram callback IDs so webhook retries do not double-count a
-click. New lessons start both counters at zero. `/stats` includes total explanation clicks.
+click. Its `note` column saves each successfully delivered explanation. New lessons start
+both counters at zero. `/stats` includes total explanation clicks.
 
 The topic chapter outlines are in [docs/topic-chapters.md](docs/topic-chapters.md).
 
@@ -128,7 +132,8 @@ npm run db:init
 ```
 
 Upgrading an existing install instead? Run `npm run db:migrate` before deploying this version.
-It applies the catalog, lesson completion, learning feedback, and ordered curriculum migrations. Existing sent lessons
+It applies the catalog, lesson completion, learning feedback, ordered curriculum, and
+explanation history migrations. Existing sent lessons
 count as completed, preserving the current chapter position. The new buttons appear on newly
 sent lessons; old rating buttons direct you to `/next`. For local upgrades, use
 `npm run db:migrate:local`. Fresh databases created from `schema.sql` already have the new

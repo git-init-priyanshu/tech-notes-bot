@@ -3,7 +3,7 @@ import { chapterProgress, CURRICULUM_TOPICS } from "./curriculum";
 import type { Env, Topic } from "./env";
 import { runOnce } from "./job";
 import { slotFor } from "./schedule";
-import { answerCallback, escapeHtml, lessonKeyboard, markCompleted, renderPost, sendPlain, sendPost, setWebhook } from "./telegram";
+import { answerCallback, escapeHtml, lessonKeyboard, markCompleted, renderExplanation, sendPlain, sendPost, setWebhook } from "./telegram";
 import { summarize } from "./summarize";
 import { SOURCES, type TopicSlug } from "./sources";
 
@@ -98,7 +98,11 @@ async function handleLesson(env: Env, query: NonNullable<Update["callback_query"
     return;
   }
   const explainCount = Number(clicked[1].results[0]?.explain_count ?? post.explain_count);
-  await answerCallback(env, query.id, "Preparing a simpler explanation...");
+  await answerCallback(env, query.id, "Preparing more source details and examples...");
+  const { results: explanations } = await env.DB.prepare(
+    `SELECT note FROM explanation_clicks WHERE post_id = ? AND note IS NOT NULL
+     ORDER BY clicked_at DESC, callback_id DESC LIMIT 5`,
+  ).bind(Number(id)).all<{ note: string }>();
   const chapter = post.chapter_id ? (await chapterProgress(env, post.topic)).find((chapter) => chapter.id === post.chapter_id) : undefined;
   const note = await summarize(env, topic, {
     title: post.title,
@@ -116,17 +120,25 @@ async function handleLesson(env: Env, query: NonNullable<Update["callback_query"
     previousNote: post.note ?? post.summary,
     daysWithoutDone,
     explainCount,
+    previousExplanations: explanations.reverse().map((explanation) => explanation.note),
   });
   if (!note || note.skip) {
-    await sendPlain(env, "Could not explain this lesson right now. Try Explain more again.");
+    await sendPlain(env, "Could not load the source or expand this lesson right now. Try Explain more again.");
     return;
   }
 
   const current = await env.DB.prepare("SELECT completed_at FROM posts WHERE id = ?")
     .bind(Number(id)).first<{ completed_at: number | null }>();
-  const messageId = await sendPost(env, renderPost(topic, note, post.source, post.url),
-    lessonKeyboard(Number(id), post.url, current?.completed_at != null));
-  if (messageId === null) await sendPlain(env, "Could not send the explanation. Try Explain more again.");
+  for (const text of renderExplanation(topic, note, post.source, post.url)) {
+    const messageId = await sendPost(env, text,
+      lessonKeyboard(Number(id), post.url, current?.completed_at != null));
+    if (messageId === null) {
+      await sendPlain(env, "Could not send the full explanation. Try Explain more again.");
+      return;
+    }
+  }
+  await env.DB.prepare("UPDATE explanation_clicks SET note = ? WHERE callback_id = ?")
+    .bind(JSON.stringify(note), query.id).run();
 }
 
 async function handleChapters(env: Env, slug?: string, pageArgument?: string): Promise<void> {

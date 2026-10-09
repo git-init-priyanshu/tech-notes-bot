@@ -30,7 +30,8 @@ CREATE INDEX IF NOT EXISTS posts_topic_chapter ON posts (topic, chapter_id);
 CREATE TABLE IF NOT EXISTS explanation_clicks (
   callback_id TEXT PRIMARY KEY,
   post_id     INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-  clicked_at  INTEGER NOT NULL
+  clicked_at  INTEGER NOT NULL,
+  note        TEXT
 );
 
 CREATE INDEX IF NOT EXISTS explanation_clicks_post ON explanation_clicks (post_id);

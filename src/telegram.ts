@@ -53,6 +53,65 @@ export function renderPost(topic: Topic, note: Note, source: string, url: string
   return [...head, ...points, "", ...tail].join("\n");
 }
 
+export function renderExplanation(topic: Topic, note: Note, source: string, url: string): string[] {
+  const heading = `${topic.emoji} <b>${escapeHtml(topic.label)}</b> · <b>${escapeHtml(note.headline)}</b>`;
+  const link = `<a href="${escapeHtml(url)}">${escapeHtml(source)}</a>`;
+  const fixedLength = heading.length + link.length + 100;
+  const chunkLimit = Math.max(1, TELEGRAM_TEXT_LIMIT - fixedLength);
+  const paragraphs = [
+    note.takeaway,
+    ...note.points.map((point) => `• ${point}`),
+    ...(note.deeper ? [`🔎 ${note.deeper}`] : []),
+  ];
+  const chunks: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    let characters: string[] = [];
+    let escapedLength = 0;
+    for (const character of paragraph) {
+      const escaped = escapeHtml(character);
+      while (characters.length && escapedLength + escaped.length > chunkLimit) {
+        let newline = -1;
+        let whitespace = -1;
+        for (let index = characters.length - 1; index >= 0; index--) {
+          if (newline < 0 && characters[index] === "\n") newline = index;
+          if (whitespace < 0 && /\s/.test(characters[index])) whitespace = index;
+          if (newline >= 0 && whitespace >= 0) break;
+        }
+        const boundary = newline >= 0 ? newline + 1 : whitespace + 1;
+        if (boundary > 0) {
+          chunks.push(characters.slice(0, boundary).join(""));
+          characters = characters.slice(boundary);
+          escapedLength = characters.reduce((length, value) => length + escapeHtml(value).length, 0);
+        } else {
+          chunks.push(characters.join(""));
+          characters = [];
+          escapedLength = 0;
+        }
+      }
+      characters.push(character);
+      escapedLength += escaped.length;
+    }
+    if (characters.length || !paragraph) chunks.push(characters.join(""));
+  }
+
+  const parts: string[] = [];
+  let body = "";
+  for (const chunk of chunks) {
+    const escaped = escapeHtml(chunk);
+    if (body && body.length + escaped.length + 2 > chunkLimit) {
+      parts.push(body);
+      body = "";
+    }
+    body += `${body ? "\n\n" : ""}${escaped}`;
+  }
+  if (body || !parts.length) parts.push(body);
+
+  return parts.map((part, index) =>
+    `${heading}\n\nExplain more · Part ${index + 1}\n\n${part}\n\n${link}`,
+  );
+}
+
 export async function sendPost(env: Env, text: string, keyboard: unknown): Promise<number | null> {
   const response = await api(env, "sendMessage", {
     chat_id: env.TELEGRAM_CHAT_ID,
