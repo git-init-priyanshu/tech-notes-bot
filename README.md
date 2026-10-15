@@ -48,6 +48,10 @@ Two kinds of source:
   affect selection, and two chapters can share an article without sharing completion.
 - **Feeds** are RSS and remain only for the unscheduled `systems` topic.
 
+System Design Primer links open the exact README section used for the chapter. Source-link
+corrections also update saved lessons, so repeats and explanations use the corrected link.
+Previously delivered Telegram messages keep their original links.
+
 Each topic also carries an angle that steers the summary. `ai` is pointed at what companies
 hiring AI engineers actually expect: retrieval and RAG quality, evaluation harnesses and error
 analysis, agent orchestration and tool use, context engineering, guardrails, cost and latency,
