@@ -25,6 +25,9 @@ That is one each of JavaScript, React, AI, backend and system design. The table 
 `src/schedule.ts`; edit it and the daily mix changes with it. The cron stays hourly either way,
 and an hour with no entry just returns early.
 
+If AI fails to send at midnight, it retries at 01:00 and 02:00 local time. A successful
+delivery blocks further sends that day, including when Done is clicked before a retry slot.
+
 Topics: `javascript`, `react`, `backend`, `systemdesign`, `ai`, and `systems`.
 `systems` has no scheduled slot and is only reachable through
 `/next systems`.
@@ -138,6 +141,9 @@ count as completed, preserving the current chapter position. The new buttons app
 sent lessons; old rating buttons direct you to `/next`. For local upgrades, use
 `npm run db:migrate:local`. Fresh databases created from `schema.sql` already have the new
 columns and do not need these historical migrations.
+
+Source corrections apply without resetting chapter order, completion, or feedback counters.
+Workers Logs records scheduled outcomes and source/model failures for diagnosis.
 
 ### 5. Set the secrets
 

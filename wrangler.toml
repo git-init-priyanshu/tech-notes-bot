@@ -13,3 +13,7 @@ database_id = "73532c3c-2908-42da-aa72-16b5f1e0f417"
 [vars]
 OPENROUTER_MODEL = "openai/gpt-6-luna"
 TZ_OFFSET_MINUTES = "330"
+
+[observability.logs]
+enabled = true
+invocation_logs = false

@@ -4,6 +4,8 @@ import type { TopicSlug } from "./sources";
 // 5 notes a day, one per topic, spaced about five hours apart around the clock.
 export const SCHEDULE: Record<number, TopicSlug> = {
   0: "ai",
+  1: "ai",
+  2: "ai",
   5: "javascript",
   10: "react",
   15: "backend",

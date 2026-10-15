@@ -42,7 +42,10 @@ async function articleText(candidate: Candidate, expanded: boolean): Promise<str
       headers: { "user-agent": USER_AGENT, accept: "text/html, text/plain, */*" },
       signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) return expanded || candidate.chapterId ? "" : candidate.description;
+    if (!response.ok) {
+      console.error("lesson source fetch failed", candidate.chapterId ?? candidate.title, candidate.textUrl, response.status);
+      return expanded || candidate.chapterId ? "" : candidate.description;
+    }
     let raw = await response.text();
     if (candidate.format === "html") {
       raw = raw.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] ?? raw;
@@ -78,7 +81,8 @@ async function articleText(candidate: Candidate, expanded: boolean): Promise<str
     const body = candidate.format === "markdown" ? raw.replace(/\s+/g, " ").trim() : stripTags(raw);
     if (candidate.chapterId) return body.length >= 80 ? body.slice(0, 14_000) : "";
     return body.length > 600 ? body.slice(0, 14_000) : candidate.description;
-  } catch {
+  } catch (error) {
+    console.error("lesson source fetch failed", candidate.chapterId ?? candidate.title, candidate.textUrl, String(error));
     return expanded || candidate.chapterId ? "" : candidate.description;
   }
 }
@@ -112,7 +116,10 @@ export async function summarize(
   const expanded = feedback?.mode === "explain";
   const text = await articleText(candidate, expanded);
   if (expanded && text.length < 80) return null;
-  if (candidate.chapterId && text.length < 80 && !feedback) return null;
+  if (candidate.chapterId && text.length < 80 && !feedback) {
+    console.error("chapter source has no usable text", candidate.chapterId);
+    return null;
+  }
   if (!candidate.chapterId && text.length < 300 && !feedback) return { skip: true, headline: "", takeaway: "", points: [], deeper: "" };
 
   const prompt = `${expanded ? "You write an expanded lesson that can span several Telegram messages." : "You write a single push notification for one engineer's phone."} Topic bucket: ${topic.label}.
@@ -228,13 +235,14 @@ ${feedback ? '- Leave "deeper" empty. Keep attention on understanding the curren
 
   const payload = (await response.json()) as {
     error?: { message: string };
-    choices?: Array<{ message: { content: string | null } }>;
+    choices?: Array<{ message: { content: string | null }; finish_reason?: string }>;
   };
   if (payload.error) {
     console.error("openrouter", payload.error.message);
     return null;
   }
   const note = parseJson(payload.choices?.[0]?.message?.content ?? "");
+  if (!note) console.error("invalid lesson response", candidate.chapterId ?? candidate.title, payload.choices?.[0]?.finish_reason);
   if (note && candidate.chapterId && !note.skip) note.headline = candidate.title;
   return note;
 }

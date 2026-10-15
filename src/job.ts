@@ -215,7 +215,10 @@ export async function runOnce(env: Env, slug?: string): Promise<string> {
       continue;
     }
     if (note.skip) {
-      if (isCurriculum) return `${topic.slug}: chapter generation declined; chapter unchanged`;
+      if (isCurriculum) {
+        console.error("curriculum chapter generation declined", topic.slug, candidate.chapterId);
+        return `${topic.slug}: chapter generation declined; chapter unchanged`;
+      }
       await env.DB.prepare("INSERT OR IGNORE INTO seen (url, seen_at) VALUES (?, ?)")
         .bind(candidate.url, Date.now()).run();
       continue;
